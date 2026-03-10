@@ -1,5 +1,7 @@
 import { StyleSheet, View } from "react-native";
-import MapView from "react-native-maps";
+import MapView, { Marker } from "react-native-maps";
+import { stations } from "../../data/stations";
+import { router } from "expo-router";
 
 export default function HomeScreen() {
   return (
@@ -12,7 +14,28 @@ export default function HomeScreen() {
           latitudeDelta: 0.1,
           longitudeDelta: 0.1,
         }}
-      />
+      >
+       {stations.map((station) => (
+  <Marker
+    key={station.id}
+    coordinate={{
+      latitude: station.latitude,
+      longitude: station.longitude,
+    }}
+    title={station.name}
+    description="Fuel station"
+    onPress={() =>
+      router.push({
+        pathname: "/station/[id]",
+        params: {
+          id: station.id,
+          name: station.name,
+        },
+      })
+    }
+  />
+))}
+      </MapView>
     </View>
   );
 }
