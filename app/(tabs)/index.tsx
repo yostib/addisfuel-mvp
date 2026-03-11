@@ -1,7 +1,8 @@
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View,Text } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { stations } from "../../data/stations";
 import { router } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 export default function HomeScreen() {
   return (
@@ -17,23 +18,32 @@ export default function HomeScreen() {
       >
        {stations.map((station) => (
   <Marker
-    key={station.id}
-    coordinate={{
-      latitude: station.latitude,
-      longitude: station.longitude,
-    }}
-    title={station.name}
-    description="Fuel station"
-    onPress={() =>
-      router.push({
-        pathname: "/station/[id]",
-        params: {
-          id: station.id,
-          name: station.name,
-        },
-      })
-    }
-  />
+  key={station.id}
+  coordinate={{
+    latitude: station.latitude,
+    longitude: station.longitude,
+  }}
+  onPress={() =>
+    router.push({
+      pathname: "/station/[id]",
+      params: {
+        id: station.id,
+        name: station.name,
+      },
+    })
+  }
+>
+  <View style={{ alignItems: "center" }}>
+    <MaterialCommunityIcons
+      name="gas-station"
+      size={34}
+      color="#2ecc71"
+    />
+    <Text style={{ fontSize: 12, fontWeight: "600", color: "white" }}>
+      {station.name}
+    </Text>
+  </View>
+</Marker>
 ))}
       </MapView>
     </View>
