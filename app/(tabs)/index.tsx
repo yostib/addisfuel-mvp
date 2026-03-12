@@ -1,13 +1,52 @@
-import { StyleSheet, View, Text } from "react-native";
+import { StyleSheet, View, Text, Pressable } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { stations } from "../../data/stations";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useRef } from "react";
+import * as Location from "expo-location";
 
 export default function HomeScreen() {
+  const mapRef = useRef<MapView | null>(null);
+
+  const getMarkerColor = (stationId: string) => {
+    // temporary logic until Firebase integration
+    return "#2ecc71"; // default green
+  };
+
+  // Center map on real user location
+  const goToMyLocation = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+
+    if (status !== "granted") {
+      alert("Permission denied");
+      return;
+    }
+
+    const location = await Location.getCurrentPositionAsync({});
+
+    mapRef.current?.animateToRegion({
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    });
+  };
+
+  // Developer test button (centers Addis)
+  const goToAddis = () => {
+    mapRef.current?.animateToRegion({
+      latitude: 9.03,
+      longitude: 38.74,
+      latitudeDelta: 0.08,
+      longitudeDelta: 0.08,
+    });
+  };
+
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         style={styles.map}
         initialRegion={{
           latitude: 9.03,
@@ -39,7 +78,7 @@ export default function HomeScreen() {
                 <MaterialCommunityIcons
                   name="gas-station"
                   size={24}
-                  color="#2ecc71"
+                  color={getMarkerColor(station.id)}
                 />
               </View>
               <View style={styles.markerLabel}>
@@ -49,6 +88,16 @@ export default function HomeScreen() {
           </Marker>
         ))}
       </MapView>
+
+      {/* My Location Button */}
+      <Pressable style={styles.locationButton} onPress={goToMyLocation}>
+        <Text style={styles.locationText}>📍 My Location</Text>
+      </Pressable>
+
+      {/* Test Addis Button */}
+      <Pressable style={styles.testButton} onPress={goToAddis}>
+        <Text style={styles.locationText}>🧪 Test Addis</Text>
+      </Pressable>
     </View>
   );
 }
@@ -82,9 +131,33 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   markerText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "600",
     color: "white",
     textAlign: "center",
+  },
+  locationButton: {
+    position: "absolute",
+    bottom: 110,
+    right: 20,
+    backgroundColor: "#2ecc71",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 25,
+    elevation: 5,
+  },
+  testButton: {
+    position: "absolute",
+    bottom: 60,
+    right: 20,
+    backgroundColor: "#3498db",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 25,
+    elevation: 5,
+  },
+  locationText: {
+    color: "white",
+    fontWeight: "600",
   },
 });
