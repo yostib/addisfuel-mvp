@@ -33,19 +33,25 @@ export default function HomeScreen() {
 
     // Cleanup listener on unmount
     return unsubscribe;
-  }, []); // ✅ Properly closed useEffect
+  }, []);
 
-  // ✅ Moved outside useEffect, defined before it's used
+  // Color coding:
+  // Gray/Silver = No reports yet (default)
+  // Green = Fuel available
+  // Red = No fuel
   const getMarkerColor = (stationId: string) => {
     const report = stationStatus[stationId];
 
-    if (!report) return "#f1c40f"; // yellow if no reports
+    // No report yet - use gray/silver
+    if (!report) return "#94a3b8"; // Slate gray - visible but neutral
 
+    // Check if either petrol or diesel is available
     if (report.petrol || report.diesel) {
-      return "#2ecc71"; // green
+      return "#2ecc71"; // Green for available
     }
 
-    return "#e74c3c"; // red
+    // Both petrol and diesel are false/unavailable
+    return "#e74c3c"; // Red for no fuel
   };
 
   // Center map on real user location
@@ -122,10 +128,28 @@ export default function HomeScreen() {
         ))}
       </MapView>
 
+      {/* Legend */}
+      <View style={styles.legendContainer}>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: "#94a3b8" }]} />
+          <Text style={styles.legendText}>No reports</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: "#2ecc71" }]} />
+          <Text style={styles.legendText}>Fuel available</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: "#e74c3c" }]} />
+          <Text style={styles.legendText}>No fuel</Text>
+        </View>
+      </View>
+
+      {/* My Location Button */}
       <Pressable style={styles.locationButton} onPress={goToMyLocation}>
         <Text style={styles.locationText}>📍 My Location</Text>
       </Pressable>
 
+      {/* Test Addis Button */}
       <Pressable style={styles.testButton} onPress={goToAddis}>
         <Text style={styles.locationText}>🧪 Test Addis</Text>
       </Pressable>
@@ -190,5 +214,34 @@ const styles = StyleSheet.create({
   locationText: {
     color: "white",
     fontWeight: "600",
+  },
+  // Legend styles
+  legendContainer: {
+    position: "absolute",
+    top: 20,
+    left: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    padding: 10,
+    borderRadius: 8,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 4,
+  },
+  legendDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  legendText: {
+    fontSize: 12,
+    color: "#333",
   },
 });
