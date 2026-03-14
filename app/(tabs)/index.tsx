@@ -5,13 +5,47 @@ import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRef } from "react";
 import * as Location from "expo-location";
+import { useState, useEffect } from "react";
+import { db } from "../../firebase"; // correct path
+import { collection, onSnapshot } from "firebase/firestore";
 
 export default function HomeScreen() {
+  // State to hold real-time station status
+  const [stationStatus, setStationStatus] = useState({});
   const mapRef = useRef<MapView | null>(null);
 
+  // Real-time updates from Firebase
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "fuelReports"), (snapshot) => {
+      const reports = {};
+
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        reports[data.stationId] = {
+          petrol: data.petrol,
+          diesel: data.diesel,
+          timestamp: data.timestamp,
+        };
+      });
+
+      setStationStatus(reports);
+    });
+
+    // Cleanup listener on unmount
+    return unsubscribe;
+  }, []); // ✅ Properly closed useEffect
+
+  // ✅ Moved outside useEffect, defined before it's used
   const getMarkerColor = (stationId: string) => {
-    // temporary logic until Firebase integration
-    return "#2ecc71"; // default green
+    const report = stationStatus[stationId];
+
+    if (!report) return "#f1c40f"; // yellow if no reports
+
+    if (report.petrol || report.diesel) {
+      return "#2ecc71"; // green
+    }
+
+    return "#e74c3c"; // red
   };
 
   // Center map on real user location
@@ -72,7 +106,6 @@ export default function HomeScreen() {
               })
             }
           >
-            {/* Fixed marker implementation */}
             <View style={styles.markerContainer}>
               <View style={styles.markerBubble}>
                 <MaterialCommunityIcons
@@ -89,12 +122,10 @@ export default function HomeScreen() {
         ))}
       </MapView>
 
-      {/* My Location Button */}
       <Pressable style={styles.locationButton} onPress={goToMyLocation}>
         <Text style={styles.locationText}>📍 My Location</Text>
       </Pressable>
 
-      {/* Test Addis Button */}
       <Pressable style={styles.testButton} onPress={goToAddis}>
         <Text style={styles.locationText}>🧪 Test Addis</Text>
       </Pressable>
