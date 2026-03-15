@@ -6,12 +6,18 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRef } from "react";
 import * as Location from "expo-location";
 import { useState, useEffect } from "react";
-import { db } from "../../firebase"; // correct path
+import { db } from "../../firebase";
 import { collection, onSnapshot } from "firebase/firestore";
 
 export default function HomeScreen() {
   // State to hold real-time station status
-  const [stationStatus, setStationStatus] = useState({});
+  type StationReport = {
+    petrol: boolean;
+    diesel: boolean;
+    timestamp?: any;
+  };
+
+  const [stationStatus, setStationStatus] = useState<Record<string, StationReport>>({});
   const mapRef = useRef<MapView | null>(null);
 
   // Real-time updates from Firebase
@@ -21,40 +27,81 @@ export default function HomeScreen() {
 
       snapshot.docs.forEach((doc) => {
         const data = doc.data();
-        reports[data.stationId] = {
-          petrol: data.petrol,
-          diesel: data.diesel,
-          timestamp: data.timestamp,
-        };
+        const existing = reports[data.stationId];
+
+        if (
+          !existing ||
+          (data.timestamp &&
+            existing.timestamp &&
+            data.timestamp.seconds > existing.timestamp.seconds)
+        ) {
+          reports[data.stationId] = {
+            petrol: data.petrol,
+            diesel: data.diesel,
+            timestamp: data.timestamp,
+          };
+        }
       });
 
       setStationStatus(reports);
     });
 
-    // Cleanup listener on unmount
     return unsubscribe;
   }, []);
 
-  // Color coding:
-  // Gray/Silver = No reports yet (default)
-  // Green = Fuel available
-  // Red = No fuel
+  // Color coding based on fuel availability
   const getMarkerColor = (stationId: string) => {
     const report = stationStatus[stationId];
 
-    // No report yet - use gray/silver
-    if (!report) return "#94a3b8"; // Slate gray - visible but neutral
+    // No report yet - gray
+    if (!report) return "#94a3b8";
 
-    // Check if either petrol or diesel is available
-    if (report.petrol || report.diesel) {
-      return "#2ecc71"; // Green for available
-    }
+    // Both unavailable - red
+    if (!report.petrol && !report.diesel) return "#e74c3c";
 
-    // Both petrol and diesel are false/unavailable
-    return "#e74c3c"; // Red for no fuel
+    // Any fuel available - green
+    return "#2ecc71";
   };
 
-  // Center map on real user location
+  // Icon logic based on what fuels are available
+  const getFuelIcon = (stationId: string) => {
+    const report = stationStatus[stationId];
+
+    // No report yet - show gray gas station
+    if (!report) return "gas-station";
+
+    // Case 1: Both petrol AND diesel available
+    if (report.petrol && report.diesel) {
+      return "gas-station"; // You could also use "local-gas-station" or keep as gas-station
+    }
+
+    // Case 2: Only petrol available
+    if (report.petrol && !report.diesel) {
+      return "gas-station";
+    }
+
+    // Case 3: Only diesel available
+    if (!report.petrol && report.diesel) {
+      return "truck";
+    }
+
+    // Case 4: No fuel available - red X or close icon
+    return "close-circle";
+  };
+
+  // Optional: Get subtitle for marker (shows what's available)
+  const getFuelSubtitle = (stationId: string) => {
+    const report = stationStatus[stationId];
+    if (!report) return "No reports";
+    
+    const available = [];
+    if (report.petrol) available.push("⛽");
+    if (report.diesel) available.push("🚛");
+    
+    if (available.length === 0) return "No fuel";
+    return available.join(" ");
+  };
+
   const goToMyLocation = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
 
@@ -64,7 +111,6 @@ export default function HomeScreen() {
     }
 
     const location = await Location.getCurrentPositionAsync({});
-
     mapRef.current?.animateToRegion({
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
@@ -73,7 +119,6 @@ export default function HomeScreen() {
     });
   };
 
-  // Developer test button (centers Addis)
   const goToAddis = () => {
     mapRef.current?.animateToRegion({
       latitude: 9.03,
@@ -115,13 +160,20 @@ export default function HomeScreen() {
             <View style={styles.markerContainer}>
               <View style={styles.markerBubble}>
                 <MaterialCommunityIcons
-                  name="gas-station"
+                  name={getFuelIcon(station.id)}
                   size={24}
                   color={getMarkerColor(station.id)}
                 />
+                {/* Small indicator for both fuels available */}
+                {stationStatus[station.id]?.petrol && stationStatus[station.id]?.diesel && (
+                  <View style={styles.bothIndicator}>
+                    <Text style={styles.bothIndicatorText}>⛽🚛</Text>
+                  </View>
+                )}
               </View>
               <View style={styles.markerLabel}>
                 <Text style={styles.markerText}>{station.name}</Text>
+                <Text style={styles.markerSubText}>{getFuelSubtitle(station.id)}</Text>
               </View>
             </View>
           </Marker>
@@ -130,26 +182,42 @@ export default function HomeScreen() {
 
       {/* Legend */}
       <View style={styles.legendContainer}>
+        <Text style={{ fontWeight: "bold", marginBottom: 5 }}>Legend</Text>
+
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: "#94a3b8" }]} />
-          <Text style={styles.legendText}>No reports</Text>
+          <MaterialCommunityIcons name="gas-station" size={16} color="#94a3b8" />
+          <Text style={styles.legendText}> No reports (gray)</Text>
         </View>
+
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: "#2ecc71" }]} />
-          <Text style={styles.legendText}>Fuel available</Text>
+          <MaterialCommunityIcons name="gas-station" size={16} color="#2ecc71" />
+          <Text style={styles.legendText}> Petrol only</Text>
         </View>
+
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: "#e74c3c" }]} />
-          <Text style={styles.legendText}>No fuel</Text>
+          <MaterialCommunityIcons name="truck" size={16} color="#2ecc71" />
+          <Text style={styles.legendText}> Diesel only</Text>
+        </View>
+
+        <View style={styles.legendItem}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <MaterialCommunityIcons name="gas-station" size={16} color="#2ecc71" />
+            <Text style={{ marginHorizontal: 2 }}>+</Text>
+            <MaterialCommunityIcons name="truck" size={16} color="#2ecc71" />
+          </View>
+          <Text style={styles.legendText}> Both available</Text>
+        </View>
+
+        <View style={styles.legendItem}>
+          <MaterialCommunityIcons name="close-circle" size={16} color="#e74c3c" />
+          <Text style={styles.legendText}> No fuel</Text>
         </View>
       </View>
 
-      {/* My Location Button */}
       <Pressable style={styles.locationButton} onPress={goToMyLocation}>
         <Text style={styles.locationText}>📍 My Location</Text>
       </Pressable>
 
-      {/* Test Addis Button */}
       <Pressable style={styles.testButton} onPress={goToAddis}>
         <Text style={styles.locationText}>🧪 Test Addis</Text>
       </Pressable>
@@ -166,7 +234,7 @@ const styles = StyleSheet.create({
   },
   markerContainer: {
     alignItems: "center",
-    width: 60,
+    width: 70,
   },
   markerBubble: {
     backgroundColor: "white",
@@ -177,6 +245,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+    position: "relative",
   },
   markerLabel: {
     backgroundColor: "rgba(0, 0, 0, 0.7)",
@@ -190,6 +259,25 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "white",
     textAlign: "center",
+  },
+  markerSubText: {
+    fontSize: 9,
+    color: "#ddd",
+    textAlign: "center",
+  },
+  bothIndicator: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    backgroundColor: "#2ecc71",
+    borderRadius: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  bothIndicatorText: {
+    fontSize: 8,
+    color: "white",
+    fontWeight: "bold",
   },
   locationButton: {
     position: "absolute",
@@ -215,14 +303,13 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "600",
   },
-  // Legend styles
   legendContainer: {
     position: "absolute",
     top: 20,
-    left: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    padding: 10,
-    borderRadius: 8,
+    left: 15,
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    padding: 12,
+    borderRadius: 10,
     elevation: 5,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -234,14 +321,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginVertical: 4,
   },
-  legendDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginRight: 8,
-  },
   legendText: {
     fontSize: 12,
     color: "#333",
+    marginLeft: 4,
   },
 });
