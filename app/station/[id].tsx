@@ -1,24 +1,50 @@
-import { View, Text, StyleSheet, Alert, Pressable, ScrollView, ActivityIndicator, Linking } from "react-native";
-import { useLocalSearchParams } from "expo-router";
-import { collection, addDoc, serverTimestamp, query, where, orderBy, onSnapshot, Timestamp, getDocs } from "firebase/firestore";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Alert,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Linking,
+  Animated,
+} from "react-native";
+import { useLocalSearchParams, router } from "expo-router";
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  Timestamp,
+  getDocs,
+} from "firebase/firestore";
 import { db } from "../../firebase";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 interface Report {
   id: string;
   petrol: boolean;
   diesel: boolean;
-  queueLength?: 'low' | 'medium' | 'high';
+  queueLength?: "low" | "medium" | "high";
   timestamp: Timestamp;
 }
 
-export default function StationScreen() {
+export default function StationDetailScreen() {
   const params = useLocalSearchParams();
   const [reports, setReports] = useState<Report[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedQueue, setSelectedQueue] = useState<'low' | 'medium' | 'high' | null>(null);
+  const [selectedQueue, setSelectedQueue] = useState<
+    "low" | "medium" | "high" | null
+  >(null);
   const [indexError, setIndexError] = useState(false);
+
+  // Animation values
+  const petrolPulseAnim = useRef(new Animated.Value(1)).current;
+  const dieselPulseAnim = useRef(new Animated.Value(1)).current;
 
   // Fetch reports for this station in real-time
   useEffect(() => {
@@ -30,72 +56,82 @@ export default function StationScreen() {
         const q = query(
           collection(db, "fuelReports"),
           where("stationId", "==", params.id),
-          orderBy("timestamp", "desc")
+          orderBy("timestamp", "desc"),
         );
 
-        unsubscribe = onSnapshot(q, (snapshot) => {
-          const fetchedReports: Report[] = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Report[];
-          
-          setReports(fetchedReports);
-          setIsLoading(false);
-          setIndexError(false);
-        }, async (error) => {
-          // Check if it's an index error
-          if (error.code === 'failed-precondition' || error.message.includes('index')) {
-            console.log("Index missing, falling back to client-side sorting");
-            setIndexError(true);
-            
-            // Fallback: get all reports for this station and sort client-side
-            try {
-              const fallbackQuery = query(
-                collection(db, "fuelReports"),
-                where("stationId", "==", params.id) // Fixed: removed extra quote
-              );
-              
-              const snapshot = await getDocs(fallbackQuery);
-              const fetchedReports: Report[] = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              })) as Report[];
-              
-              // Sort client-side by timestamp
-              fetchedReports.sort((a, b) => {
-                if (!a.timestamp) return 1;
-                if (!b.timestamp) return -1;
-                return b.timestamp.seconds - a.timestamp.seconds;
-              });
-              
-              setReports(fetchedReports);
-              
-              // Set up a listener without orderBy for real-time updates
-              unsubscribe = onSnapshot(fallbackQuery, (snapshot) => {
-                const updatedReports: Report[] = snapshot.docs.map(doc => ({
+        unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            const fetchedReports: Report[] = snapshot.docs.map((doc) => ({
+              id: doc.id,
+              ...doc.data(),
+            })) as Report[];
+
+            setReports(fetchedReports);
+            setIsLoading(false);
+            setIndexError(false);
+          },
+          async (error) => {
+            // Check if it's an index error
+            if (
+              error.code === "failed-precondition" ||
+              error.message.includes("index")
+            ) {
+              console.log("Index missing, falling back to client-side sorting");
+              setIndexError(true);
+
+              // Fallback: get all reports for this station and sort client-side
+              try {
+                const fallbackQuery = query(
+                  collection(db, "fuelReports"),
+                  where("stationId", "==", params.id),
+                );
+
+                const snapshot = await getDocs(fallbackQuery);
+                const fetchedReports: Report[] = snapshot.docs.map((doc) => ({
                   id: doc.id,
-                  ...doc.data()
+                  ...doc.data(),
                 })) as Report[];
-                
-                // Sort client-side
-                updatedReports.sort((a, b) => {
+
+                // Sort client-side by timestamp
+                fetchedReports.sort((a, b) => {
                   if (!a.timestamp) return 1;
                   if (!b.timestamp) return -1;
                   return b.timestamp.seconds - a.timestamp.seconds;
                 });
-                
-                setReports(updatedReports);
-              });
-            } catch (fallbackError) {
-              console.error("Fallback query also failed:", fallbackError);
-              Alert.alert("Error", "Failed to load reports. Please try again.");
+
+                setReports(fetchedReports);
+
+                // Set up a listener without orderBy for real-time updates
+                unsubscribe = onSnapshot(fallbackQuery, (snapshot) => {
+                  const updatedReports: Report[] = snapshot.docs.map((doc) => ({
+                    id: doc.id,
+                    ...doc.data(),
+                  })) as Report[];
+
+                  // Sort client-side
+                  updatedReports.sort((a, b) => {
+                    if (!a.timestamp) return 1;
+                    if (!b.timestamp) return -1;
+                    return b.timestamp.seconds - a.timestamp.seconds;
+                  });
+
+                  setReports(updatedReports);
+                });
+              } catch (fallbackError) {
+                console.error("Fallback query also failed:", fallbackError);
+                Alert.alert(
+                  "Error",
+                  "Failed to load reports. Please try again.",
+                );
+              }
+            } else {
+              console.error("Error fetching reports:", error);
+              Alert.alert("Error", "Failed to load reports");
             }
-          } else {
-            console.error("Error fetching reports:", error);
-            Alert.alert("Error", "Failed to load reports");
-          }
-          setIsLoading(false);
-        });
+            setIsLoading(false);
+          },
+        );
       } catch (error) {
         console.error("Error setting up listener:", error);
         setIsLoading(false);
@@ -111,52 +147,118 @@ export default function StationScreen() {
     };
   }, [params.id]);
 
+  // Start animations when current status changes
+  useEffect(() => {
+    if (currentStatus) {
+      // Animate petrol if available
+      if (currentStatus.petrol) {
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(petrolPulseAnim, {
+              toValue: 1.1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(petrolPulseAnim, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ]),
+        ).start();
+      } else {
+        petrolPulseAnim.setValue(1);
+      }
+
+      // Animate diesel if available
+      if (currentStatus.diesel) {
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(dieselPulseAnim, {
+              toValue: 1.1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dieselPulseAnim, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ]),
+        ).start();
+      } else {
+        dieselPulseAnim.setValue(1);
+      }
+    }
+  }, [reports[0]]); // Run when latest report changes
+
   // Calculate statistics
   const statistics = {
     totalReports: reports.length,
     lastReport: reports.length > 0 ? reports[0] : null,
-    
-    petrolAvailable: reports.filter(r => r.petrol).length,
-    dieselAvailable: reports.filter(r => r.diesel).length,
-    bothAvailable: reports.filter(r => r.petrol && r.diesel).length,
-    noFuel: reports.filter(r => !r.petrol && !r.diesel).length,
-    
+
+    petrolAvailable: reports.filter((r) => r.petrol).length,
+    dieselAvailable: reports.filter((r) => r.diesel).length,
+    bothAvailable: reports.filter((r) => r.petrol && r.diesel).length,
+    noFuel: reports.filter((r) => !r.petrol && !r.diesel).length,
+
     queueLengths: {
-      low: reports.filter(r => r.queueLength === 'low').length,
-      medium: reports.filter(r => r.queueLength === 'medium').length,
-      high: reports.filter(r => r.queueLength === 'high').length,
-    }
+      low: reports.filter((r) => r.queueLength === "low").length,
+      medium: reports.filter((r) => r.queueLength === "medium").length,
+      high: reports.filter((r) => r.queueLength === "high").length,
+    },
   };
 
   // Get current status (latest report)
   const currentStatus = reports[0];
-  
-  const getQueueColor = (queue?: 'low' | 'medium' | 'high') => {
-    switch(queue) {
-      case 'low': return '#27ae60';
-      case 'medium': return '#f39c12';
-      case 'high': return '#e74c3c';
-      default: return '#95a5a6';
+
+  const getQueueColor = (queue?: "low" | "medium" | "high") => {
+    switch (queue) {
+      case "low":
+        return "#27ae60";
+      case "medium":
+        return "#f39c12";
+      case "high":
+        return "#e74c3c";
+      default:
+        return "#95a5a6";
     }
   };
 
-  const getQueueIcon = (queue?: 'low' | 'medium' | 'high') => {
-    switch(queue) {
-      case 'low': return '🟢';
-      case 'medium': return '🟡';
-      case 'high': return '🔴';
-      default: return '⚪';
+  const getQueueIcon = (queue?: "low" | "medium" | "high") => {
+    switch (queue) {
+      case "low":
+        return "🟢";
+      case "medium":
+        return "🟡";
+      case "high":
+        return "🔴";
+      default:
+        return "⚪";
+    }
+  };
+
+  const getQueueText = (queue?: "low" | "medium" | "high") => {
+    switch (queue) {
+      case "low":
+        return "Low Queue";
+      case "medium":
+        return "Medium Queue";
+      case "high":
+        return "Long Queue";
+      default:
+        return "Unknown";
     }
   };
 
   const formatTime = (timestamp?: Timestamp) => {
-    if (!timestamp) return 'Never';
-    
+    if (!timestamp) return "Never";
+
     const date = timestamp.toDate();
     const now = new Date();
     const diffMinutes = Math.floor((now.getTime() - date.getTime()) / 60000);
-    
-    if (diffMinutes < 1) return 'Just now';
+
+    if (diffMinutes < 1) return "Just now";
     if (diffMinutes < 60) return `${diffMinutes} min ago`;
     if (diffMinutes < 1440) return `${Math.floor(diffMinutes / 60)} hours ago`;
     return date.toLocaleDateString();
@@ -164,7 +266,10 @@ export default function StationScreen() {
 
   const reportFuel = async (petrol: boolean, diesel: boolean) => {
     if (!selectedQueue) {
-      Alert.alert("Queue Length", "Please select the queue length before reporting");
+      Alert.alert(
+        "Queue Length",
+        "Please select the queue length before reporting",
+      );
       return;
     }
 
@@ -186,6 +291,10 @@ export default function StationScreen() {
     }
   };
 
+  const navigateBack = () => {
+    router.back();
+  };
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -197,107 +306,224 @@ export default function StationScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* Index Warning Banner - Only show if index is missing */}
+      {/* Header with back button */}
+      <View style={styles.header}>
+        <Pressable onPress={navigateBack} style={styles.backButton}>
+          <MaterialCommunityIcons name="arrow-left" size={24} color="#2d3436" />
+        </Pressable>
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>{params.name}</Text>
+          <Text style={styles.stationId}>ID: {params.id}</Text>
+        </View>
+      </View>
+
+      {/* Index Warning Banner */}
       {indexError && (
         <View style={styles.warningBanner}>
           <MaterialCommunityIcons name="alert" size={24} color="#f39c12" />
           <Text style={styles.warningText}>
             For better performance, please create the required database index.
           </Text>
-          <Pressable 
-            style={styles.warningButton}
-            onPress={() => {
-              const indexUrl = "https://console.firebase.google.com/v1/r/project/addisfuel-bc703/firestore/indexes?create_composite=ClNwcm9qZWN0cy9hZGRpc2Z1ZWwtYmM3MDMvZGF0YWJhc2VzLyhkZWZhdWx0KS9jb2xsZWN0aW9uR3JvdXBzL2Z1ZWxSZXBvcnRzL2luZGV4ZXMvXxABGg0KCXN0YXRpb25JZBABGg0KCXRpbWVzdGFtcBACGgwKCF9fbmFtZV9fEAI";
-              Alert.alert(
-                "Create Index",
-                "Would you like to open the Firebase Console to create the index?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Open Console", onPress: () => Linking.openURL(indexUrl) }
-                ]
-              );
-            }}
-          >
-            <Text style={styles.warningButtonText}>Fix</Text>
-          </Pressable>
         </View>
       )}
 
-      {/* PRIORITY 1: Station Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>{params.name}</Text>
-        <Text style={styles.stationId}>ID: {params.id}</Text>
-      </View>
-
-      {/* PRIORITY 2: Current Status Card - Most Important */}
+      {/* Current Status Card - Enhanced */}
       <View style={styles.currentStatusCard}>
         <Text style={styles.sectionTitle}>🔄 CURRENT STATUS</Text>
-        
+
         {currentStatus ? (
           <>
-            {/* Fuel Availability */}
+            {/* Fuel Availability with Animation */}
+            <Text style={styles.statusSubTitle}>Fuel Availability:</Text>
             <View style={styles.fuelStatusRow}>
-              <View style={[styles.fuelBadge, currentStatus.petrol ? styles.available : styles.unavailable]}>
-                <MaterialCommunityIcons 
-                  name="gas-station" 
-                  size={20} 
-                  color="white" 
-                  style={styles.fuelBadgeIcon}
+              {/* Petrol Indicator */}
+              <Animated.View
+                style={[
+                  styles.fuelCard,
+                  currentStatus.petrol
+                    ? styles.fuelAvailable
+                    : styles.fuelUnavailable,
+                  {
+                    transform: [
+                      { scale: currentStatus.petrol ? petrolPulseAnim : 1 },
+                    ],
+                  },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="gas-station"
+                  size={32}
+                  color="white"
                 />
-                <Text style={styles.fuelBadgeText}>Petrol</Text>
-              </View>
-              <View style={[styles.fuelBadge, currentStatus.diesel ? styles.available : styles.unavailable]}>
-                <MaterialCommunityIcons 
-                  name="truck" 
-                  size={20} 
-                  color="white" 
-                  style={styles.fuelBadgeIcon}
-                />
-                <Text style={styles.fuelBadgeText}>Diesel</Text>
-              </View>
+                <Text style={styles.fuelCardText}>Petrol</Text>
+                {currentStatus.petrol && (
+                  <View style={styles.availableBadge}>
+                    <MaterialCommunityIcons
+                      name="check-circle"
+                      size={16}
+                      color="white"
+                    />
+                    <Text style={styles.availableBadgeText}>Available</Text>
+                  </View>
+                )}
+                {!currentStatus.petrol && (
+                  <View style={styles.unavailableBadge}>
+                    <MaterialCommunityIcons
+                      name="close-circle"
+                      size={16}
+                      color="white"
+                    />
+                    <Text style={styles.availableBadgeText}>Unavailable</Text>
+                  </View>
+                )}
+              </Animated.View>
+
+              {/* Diesel Indicator */}
+              <Animated.View
+                style={[
+                  styles.fuelCard,
+                  currentStatus.diesel
+                    ? styles.fuelAvailable
+                    : styles.fuelUnavailable,
+                  {
+                    transform: [
+                      { scale: currentStatus.diesel ? dieselPulseAnim : 1 },
+                    ],
+                  },
+                ]}
+              >
+                <MaterialCommunityIcons name="truck" size={32} color="white" />
+                <Text style={styles.fuelCardText}>Diesel</Text>
+                {currentStatus.diesel && (
+                  <View style={styles.availableBadge}>
+                    <MaterialCommunityIcons
+                      name="check-circle"
+                      size={16}
+                      color="white"
+                    />
+                    <Text style={styles.availableBadgeText}>Available</Text>
+                  </View>
+                )}
+                {!currentStatus.diesel && (
+                  <View style={styles.unavailableBadge}>
+                    <MaterialCommunityIcons
+                      name="close-circle"
+                      size={16}
+                      color="white"
+                    />
+                    <Text style={styles.availableBadgeText}>Unavailable</Text>
+                  </View>
+                )}
+              </Animated.View>
             </View>
 
-            {/* Queue Status */}
+            {/* Both Available Special Indicator */}
+            {currentStatus.petrol && currentStatus.diesel && (
+              <View style={styles.bothAvailableContainer}>
+                <MaterialCommunityIcons
+                  name="check-circle"
+                  size={20}
+                  color="#2ecc71"
+                />
+                <Text style={styles.bothAvailableText}>
+                  Both Petrol and Diesel Available!
+                </Text>
+              </View>
+            )}
+
+            {/* Queue Status with Enhanced Display */}
             {currentStatus.queueLength && (
               <View style={styles.queueStatusContainer}>
-                <Text style={styles.queueStatusLabel}>Queue Length:</Text>
-                <View style={[styles.queueStatusIndicator, { backgroundColor: getQueueColor(currentStatus.queueLength) }]}>
-                  <Text style={styles.queueStatusIcon}>{getQueueIcon(currentStatus.queueLength)}</Text>
-                  <Text style={styles.queueStatusText}>
-                    {currentStatus.queueLength.toUpperCase()}
+                <Text style={styles.statusSubTitle}>Queue Status:</Text>
+                <View
+                  style={[
+                    styles.queueCard,
+                    {
+                      backgroundColor: getQueueColor(currentStatus.queueLength),
+                    },
+                  ]}
+                >
+                  <Text style={styles.queueIcon}>
+                    {getQueueIcon(currentStatus.queueLength)}
                   </Text>
+                  <View style={styles.queueInfo}>
+                    <Text style={styles.queueTitle}>
+                      {getQueueText(currentStatus.queueLength)}
+                    </Text>
+                    <Text style={styles.queueDescription}>
+                      {currentStatus.queueLength === "low" &&
+                        "Less than 5 minutes wait"}
+                      {currentStatus.queueLength === "medium" &&
+                        "5-15 minutes wait"}
+                      {currentStatus.queueLength === "high" &&
+                        "More than 15 minutes wait"}
+                    </Text>
+                  </View>
                 </View>
               </View>
             )}
 
             {/* Report Time */}
             <View style={styles.reportTimeContainer}>
-              <MaterialCommunityIcons name="clock-outline" size={14} color="#7f8c8d" />
+              <MaterialCommunityIcons
+                name="clock-outline"
+                size={14}
+                color="#7f8c8d"
+              />
               <Text style={styles.lastReportTime}>
                 Last report: {formatTime(currentStatus.timestamp)}
               </Text>
             </View>
+
+            {/* Report Count Badge */}
+            {statistics.totalReports > 0 && (
+              <View style={styles.reportCountBadge}>
+                <MaterialCommunityIcons
+                  name="clipboard-text"
+                  size={14}
+                  color="#7f8c8d"
+                />
+                <Text style={styles.reportCountText}>
+                  {statistics.totalReports} total reports •{" "}
+                  {statistics.bothAvailable} both, {statistics.petrolAvailable}{" "}
+                  petrol, {statistics.dieselAvailable} diesel
+                </Text>
+              </View>
+            )}
           </>
         ) : (
           <View style={styles.noReportsContainer}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={40} color="#95a5a6" />
-            <Text style={styles.noReportsText}>No reports yet for this station</Text>
-            <Text style={styles.noReportsSubText}>Be the first to report!</Text>
+            <MaterialCommunityIcons
+              name="alert-circle-outline"
+              size={50}
+              color="#95a5a6"
+            />
+            <Text style={styles.noReportsText}>
+              No reports yet for this station
+            </Text>
+            <Text style={styles.noReportsSubText}>
+              Be the first to report fuel availability!
+            </Text>
           </View>
         )}
       </View>
 
-      {/* PRIORITY 3: Report Availability - Action Section */}
+      {/* Report Section */}
       <View style={styles.reportSection}>
         <Text style={styles.sectionTitle}>📝 REPORT FUEL STATUS</Text>
-        
-        {/* Queue Selection - Required before reporting */}
+
+        {/* Queue Selection */}
         <View style={styles.queueSelectionContainer}>
-          <Text style={styles.subSectionTitle}>Step 1: Select Queue Length</Text>
+          <Text style={styles.subSectionTitle}>
+            Step 1: Select Queue Length
+          </Text>
           <View style={styles.queueOptions}>
             <Pressable
-              style={[styles.queueOption, selectedQueue === 'low' && styles.selectedQueue]}
-              onPress={() => setSelectedQueue('low')}
+              style={[
+                styles.queueOption,
+                selectedQueue === "low" && styles.selectedQueue,
+              ]}
+              onPress={() => setSelectedQueue("low")}
             >
               <Text style={styles.queueOptionIcon}>🟢</Text>
               <Text style={styles.queueOptionText}>Low</Text>
@@ -305,8 +531,11 @@ export default function StationScreen() {
             </Pressable>
 
             <Pressable
-              style={[styles.queueOption, selectedQueue === 'medium' && styles.selectedQueue]}
-              onPress={() => setSelectedQueue('medium')}
+              style={[
+                styles.queueOption,
+                selectedQueue === "medium" && styles.selectedQueue,
+              ]}
+              onPress={() => setSelectedQueue("medium")}
             >
               <Text style={styles.queueOptionIcon}>🟡</Text>
               <Text style={styles.queueOptionText}>Medium</Text>
@@ -314,8 +543,11 @@ export default function StationScreen() {
             </Pressable>
 
             <Pressable
-              style={[styles.queueOption, selectedQueue === 'high' && styles.selectedQueue]}
-              onPress={() => setSelectedQueue('high')}
+              style={[
+                styles.queueOption,
+                selectedQueue === "high" && styles.selectedQueue,
+              ]}
+              onPress={() => setSelectedQueue("high")}
             >
               <Text style={styles.queueOptionIcon}>🔴</Text>
               <Text style={styles.queueOptionText}>High</Text>
@@ -324,20 +556,26 @@ export default function StationScreen() {
           </View>
         </View>
 
-        <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>Step 2: Report Fuel Availability</Text>
-        
+        <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>
+          Step 2: Report Fuel Availability
+        </Text>
+
         <View style={styles.reportButtonsContainer}>
           <Pressable
             style={({ pressed }) => [
               styles.reportButton,
               styles.petrolButton,
               { opacity: pressed ? 0.8 : 1 },
-              !selectedQueue && styles.reportButtonDisabled
+              !selectedQueue && styles.reportButtonDisabled,
             ]}
             onPress={() => reportFuel(true, false)}
             disabled={!selectedQueue}
           >
-            <MaterialCommunityIcons name="gas-station" size={24} color="white" />
+            <MaterialCommunityIcons
+              name="gas-station"
+              size={24}
+              color="white"
+            />
             <Text style={styles.reportButtonText}>Petrol Only</Text>
           </Pressable>
 
@@ -346,7 +584,7 @@ export default function StationScreen() {
               styles.reportButton,
               styles.dieselButton,
               { opacity: pressed ? 0.8 : 1 },
-              !selectedQueue && styles.reportButtonDisabled
+              !selectedQueue && styles.reportButtonDisabled,
             ]}
             onPress={() => reportFuel(false, true)}
             disabled={!selectedQueue}
@@ -360,13 +598,17 @@ export default function StationScreen() {
               styles.reportButton,
               styles.bothButton,
               { opacity: pressed ? 0.8 : 1 },
-              !selectedQueue && styles.reportButtonDisabled
+              !selectedQueue && styles.reportButtonDisabled,
             ]}
             onPress={() => reportFuel(true, true)}
             disabled={!selectedQueue}
           >
             <View style={styles.bothIconsContainer}>
-              <MaterialCommunityIcons name="gas-station" size={20} color="white" />
+              <MaterialCommunityIcons
+                name="gas-station"
+                size={20}
+                color="white"
+              />
               <MaterialCommunityIcons name="truck" size={20} color="white" />
             </View>
             <Text style={styles.reportButtonText}>Both Available</Text>
@@ -377,12 +619,16 @@ export default function StationScreen() {
               styles.reportButton,
               styles.noFuelButton,
               { opacity: pressed ? 0.8 : 1 },
-              !selectedQueue && styles.reportButtonDisabled
+              !selectedQueue && styles.reportButtonDisabled,
             ]}
             onPress={() => reportFuel(false, false)}
             disabled={!selectedQueue}
           >
-            <MaterialCommunityIcons name="close-circle" size={24} color="white" />
+            <MaterialCommunityIcons
+              name="close-circle"
+              size={24}
+              color="white"
+            />
             <Text style={styles.reportButtonText}>No Fuel</Text>
           </Pressable>
         </View>
@@ -395,32 +641,32 @@ export default function StationScreen() {
         )}
       </View>
 
-      {/* PRIORITY 4: Statistics */}
+      {/* Statistics */}
       {reports.length > 0 && (
         <View style={styles.statsCard}>
           <Text style={styles.sectionTitle}>📊 STATISTICS</Text>
-          
+
           <View style={styles.statsGrid}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{statistics.totalReports}</Text>
               <Text style={styles.statLabel}>Total Reports</Text>
             </View>
-            
+
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{statistics.petrolAvailable}</Text>
               <Text style={styles.statLabel}>Petrol Reports</Text>
             </View>
-            
+
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{statistics.dieselAvailable}</Text>
               <Text style={styles.statLabel}>Diesel Reports</Text>
             </View>
-            
+
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{statistics.bothAvailable}</Text>
               <Text style={styles.statLabel}>Both Available</Text>
             </View>
-            
+
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{statistics.noFuel}</Text>
               <Text style={styles.statLabel}>No Fuel</Text>
@@ -430,54 +676,117 @@ export default function StationScreen() {
           {/* Queue Distribution */}
           <View style={styles.queueStats}>
             <Text style={styles.subSectionTitle}>Queue Distribution:</Text>
-            
+
             <View style={styles.queueBar}>
-              <View style={[styles.queueSegment, { 
-                flex: statistics.queueLengths.low || 0.1,
-                backgroundColor: '#27ae60' 
-              }]} />
-              <View style={[styles.queueSegment, { 
-                flex: statistics.queueLengths.medium || 0.1,
-                backgroundColor: '#f39c12' 
-              }]} />
-              <View style={[styles.queueSegment, { 
-                flex: statistics.queueLengths.high || 0.1,
-                backgroundColor: '#e74c3c' 
-              }]} />
+              <View
+                style={[
+                  styles.queueSegment,
+                  {
+                    flex: statistics.queueLengths.low || 0.1,
+                    backgroundColor: "#27ae60",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.queueSegment,
+                  {
+                    flex: statistics.queueLengths.medium || 0.1,
+                    backgroundColor: "#f39c12",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.queueSegment,
+                  {
+                    flex: statistics.queueLengths.high || 0.1,
+                    backgroundColor: "#e74c3c",
+                  },
+                ]}
+              />
             </View>
-            
+
             <View style={styles.queueLegend}>
-              <Text style={styles.queueLegendItem}>🟢 Low: {statistics.queueLengths.low}</Text>
-              <Text style={styles.queueLegendItem}>🟡 Med: {statistics.queueLengths.medium}</Text>
-              <Text style={styles.queueLegendItem}>🔴 High: {statistics.queueLengths.high}</Text>
+              <Text style={styles.queueLegendItem}>
+                🟢 Low: {statistics.queueLengths.low}
+              </Text>
+              <Text style={styles.queueLegendItem}>
+                🟡 Med: {statistics.queueLengths.medium}
+              </Text>
+              <Text style={styles.queueLegendItem}>
+                🔴 High: {statistics.queueLengths.high}
+              </Text>
             </View>
           </View>
         </View>
       )}
 
-      {/* PRIORITY 5: Recent Reports - Bottom */}
+      {/* Recent Reports */}
       {reports.length > 0 && (
         <View style={styles.recentReports}>
           <Text style={styles.sectionTitle}>📋 RECENT REPORTS</Text>
-          
+
           {reports.slice(0, 10).map((report, index) => (
             <View key={report.id} style={styles.reportItem}>
               <View style={styles.reportItemLeft}>
-                <Text style={styles.reportItemNumber}>#{reports.length - index}</Text>
+                <Text style={styles.reportItemNumber}>
+                  #{reports.length - index}
+                </Text>
                 <View style={styles.reportItemFuels}>
-                  {report.petrol && <MaterialCommunityIcons name="gas-station" size={16} color="#27ae60" />}
-                  {report.diesel && <MaterialCommunityIcons name="truck" size={16} color="#27ae60" />}
+                  {report.petrol && (
+                    <View style={styles.reportFuelBadge}>
+                      <MaterialCommunityIcons
+                        name="gas-station"
+                        size={14}
+                        color="#27ae60"
+                      />
+                      <Text style={styles.reportFuelText}>P</Text>
+                    </View>
+                  )}
+                  {report.diesel && (
+                    <View style={styles.reportFuelBadge}>
+                      <MaterialCommunityIcons
+                        name="truck"
+                        size={14}
+                        color="#27ae60"
+                      />
+                      <Text style={styles.reportFuelText}>D</Text>
+                    </View>
+                  )}
                   {!report.petrol && !report.diesel && (
-                    <MaterialCommunityIcons name="close-circle" size={16} color="#e74c3c" />
+                    <View
+                      style={[styles.reportFuelBadge, styles.reportNoFuelBadge]}
+                    >
+                      <MaterialCommunityIcons
+                        name="close-circle"
+                        size={14}
+                        color="#e74c3c"
+                      />
+                      <Text
+                        style={[styles.reportFuelText, styles.reportNoFuelText]}
+                      >
+                        No Fuel
+                      </Text>
+                    </View>
                   )}
                 </View>
                 {report.queueLength && (
-                  <Text style={styles.reportQueue}>
-                    {getQueueIcon(report.queueLength)}
-                  </Text>
+                  <View
+                    style={[
+                      styles.reportQueueBadge,
+                      { backgroundColor: getQueueColor(report.queueLength) },
+                    ]}
+                  >
+                    <Text style={styles.reportQueueText}>
+                      {getQueueIcon(report.queueLength)}
+                    </Text>
+                  </View>
                 )}
               </View>
-              <Text style={styles.reportTime}>{formatTime(report.timestamp)}</Text>
+              <Text style={styles.reportTime}>
+                {formatTime(report.timestamp)}
+              </Text>
             </View>
           ))}
         </View>
@@ -503,6 +812,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#666",
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  titleContainer: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#2d3436",
+    marginBottom: 4,
+  },
+  stationId: {
+    fontSize: 14,
+    color: "#7f8c8d",
+  },
   warningBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -519,30 +850,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 8,
   },
-  warningButton: {
-    backgroundColor: "#856404",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  warningButtonText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  header: {
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#2d3436",
-    marginBottom: 4,
-  },
-  stationId: {
-    fontSize: 14,
-    color: "#7f8c8d",
-  },
   currentStatusCard: {
     backgroundColor: "white",
     borderRadius: 16,
@@ -555,11 +862,17 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "700",
     marginBottom: 16,
     color: "#2d3436",
     letterSpacing: 0.5,
+  },
+  statusSubTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 12,
+    color: "#34495e",
   },
   subSectionTitle: {
     fontSize: 14,
@@ -570,85 +883,146 @@ const styles = StyleSheet.create({
   fuelStatusRow: {
     flexDirection: "row",
     justifyContent: "space-around",
+    marginBottom: 20,
+    gap: 12,
+  },
+  fuelCard: {
+    flex: 1,
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    position: "relative",
+    minHeight: 120,
+    justifyContent: "center",
+  },
+  fuelAvailable: {
+    backgroundColor: "#2ecc71",
+    shadowColor: "#2ecc71",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  fuelUnavailable: {
+    backgroundColor: "#e74c3c",
+    opacity: 0.7,
+  },
+  fuelCardText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 8,
+  },
+  availableBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.3)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  unavailableBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.3)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  availableBadgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  bothAvailableContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e8f5e9",
+    padding: 12,
+    borderRadius: 8,
     marginBottom: 16,
   },
-  fuelBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 30,
-    borderWidth: 2,
-    minWidth: 120,
-    justifyContent: "center",
-  },
-  fuelBadgeIcon: {
-    marginRight: 8,
-  },
-  available: {
-    backgroundColor: "#2ecc71",
-    borderColor: "#27ae60",
-  },
-  unavailable: {
-    backgroundColor: "#e74c3c",
-    borderColor: "#c0392b",
-  },
-  fuelBadgeText: {
-    color: "white",
+  bothAvailableText: {
+    color: "#2ecc71",
+    fontSize: 14,
     fontWeight: "600",
-    fontSize: 16,
+    marginLeft: 8,
   },
   queueStatusContainer: {
+    marginBottom: 16,
+  },
+  queueCard: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 8,
   },
-  queueStatusLabel: {
-    fontSize: 16,
-    color: "#34495e",
-    marginRight: 10,
+  queueIcon: {
+    fontSize: 32,
+    marginRight: 16,
   },
-  queueStatusIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 25,
+  queueInfo: {
+    flex: 1,
   },
-  queueStatusIcon: {
-    fontSize: 16,
-    marginRight: 6,
-  },
-  queueStatusText: {
+  queueTitle: {
     color: "white",
-    fontWeight: "600",
-    fontSize: 14,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  queueDescription: {
+    color: "white",
+    fontSize: 12,
+    opacity: 0.9,
+    marginTop: 4,
   },
   reportTimeContainer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: 8,
   },
   lastReportTime: {
     color: "#7f8c8d",
     fontSize: 12,
     marginLeft: 4,
   },
+  reportCountBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f8f9fa",
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  reportCountText: {
+    color: "#7f8c8d",
+    fontSize: 11,
+    marginLeft: 4,
+  },
   noReportsContainer: {
     alignItems: "center",
-    padding: 20,
+    padding: 30,
   },
   noReportsText: {
-    fontSize: 16,
+    fontSize: 18,
     color: "#34495e",
-    marginTop: 10,
-    fontWeight: "500",
+    marginTop: 16,
+    fontWeight: "600",
   },
   noReportsSubText: {
     fontSize: 14,
     color: "#7f8c8d",
-    marginTop: 4,
+    marginTop: 8,
   },
   reportSection: {
     backgroundColor: "white",
@@ -667,6 +1041,7 @@ const styles = StyleSheet.create({
   queueOptions: {
     flexDirection: "row",
     justifyContent: "space-between",
+    gap: 8,
   },
   queueOption: {
     alignItems: "center",
@@ -674,7 +1049,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#f8f9fa",
     flex: 1,
-    marginHorizontal: 4,
   },
   selectedQueue: {
     backgroundColor: "#e8f5e9",
@@ -734,6 +1108,7 @@ const styles = StyleSheet.create({
   bothIconsContainer: {
     flexDirection: "row",
     marginRight: 4,
+    gap: 4,
   },
   hintContainer: {
     flexDirection: "row",
@@ -763,17 +1138,17 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
     marginBottom: 20,
+    gap: 8,
   },
   statItem: {
     width: "48%",
     backgroundColor: "#f8f9fa",
     padding: 12,
     borderRadius: 10,
-    marginBottom: 8,
     alignItems: "center",
   },
   statValue: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "bold",
     color: "#2c3e50",
   },
@@ -781,6 +1156,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#7f8c8d",
     textAlign: "center",
+    marginTop: 4,
   },
   queueStats: {
     marginTop: 8,
@@ -798,6 +1174,8 @@ const styles = StyleSheet.create({
   queueLegend: {
     flexDirection: "row",
     justifyContent: "space-around",
+    flexWrap: "wrap",
+    gap: 8,
   },
   queueLegendItem: {
     fontSize: 12,
@@ -818,16 +1196,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#f1f2f6",
   },
   reportItemLeft: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   reportItemNumber: {
-    width: 35,
+    width: 40,
     fontSize: 12,
     color: "#7f8c8d",
   },
@@ -835,12 +1214,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginRight: 8,
     gap: 4,
+    flex: 1,
   },
-  reportQueue: {
-    fontSize: 14,
+  reportFuelBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#e8f5e9",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  reportNoFuelBadge: {
+    backgroundColor: "#fdeaea",
+  },
+  reportFuelText: {
+    fontSize: 10,
+    color: "#27ae60",
+    fontWeight: "600",
+    marginLeft: 2,
+  },
+  reportNoFuelText: {
+    color: "#e74c3c",
+  },
+  reportQueueBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 4,
+  },
+  reportQueueText: {
+    fontSize: 12,
   },
   reportTime: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#95a5a6",
   },
 });

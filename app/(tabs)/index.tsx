@@ -1,4 +1,11 @@
-import { StyleSheet, View, Text, Pressable, ActivityIndicator, Alert } from "react-native";
+import {
+  StyleSheet,
+  View,
+  Text,
+  Pressable,
+  ActivityIndicator,
+  Alert,
+} from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { stations, Station } from "../../data/stations";
 import { router } from "expo-router";
@@ -6,13 +13,20 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import * as Location from "expo-location";
 import { db } from "../../firebase";
-import { collection, onSnapshot, Timestamp, query, orderBy } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  Timestamp,
+  query,
+  orderBy,
+  getDocs,
+} from "firebase/firestore";
 
 // Types
 interface StationReport {
   petrol: boolean;
   diesel: boolean;
-  queueLength?: 'low' | 'medium' | 'high';
+  queueLength?: "low" | "medium" | "high";
   timestamp?: Timestamp;
   reportCount?: number;
   lastReportTime?: Timestamp;
@@ -22,7 +36,7 @@ interface FirebaseReportData {
   stationId: string;
   petrol: boolean;
   diesel: boolean;
-  queueLength?: 'low' | 'medium' | 'high';
+  queueLength?: "low" | "medium" | "high";
   timestamp: Timestamp;
 }
 
@@ -49,174 +63,284 @@ const COLORS = {
 } as const;
 
 export default function HomeScreen() {
-  const [stationStatus, setStationStatus] = useState<Record<string, StationReport>>({});
+  const [stationStatus, setStationStatus] = useState<
+    Record<string, StationReport>
+  >({});
   const [isLoading, setIsLoading] = useState(true);
-  const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
+  const [locationPermission, setLocationPermission] = useState<boolean | null>(
+    null,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
   const [selectedStation, setSelectedStation] = useState<string | null>(null);
-  
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date());
+  const [forceUpdate, setForceUpdate] = useState(0); // Add this to force re-render
+
   const mapRef = useRef<MapView | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const markersRef = useRef<Map<string, Marker>>(new Map()); // Store marker references
 
-  // Real-time updates from Firebase with error handling
-  useEffect(() => {
-    setIsLoading(true);
-    
-    // Query ordered by timestamp to get latest reports
-    const q = query(collection(db, "fuelReports"), orderBy("timestamp", "desc"));
-    
+  // Function to fetch and process reports
+  const processReports = (snapshot: any) => {
+    const reports: Record<string, StationReport> = {};
+    const reportCounts: Record<string, number> = {};
+
+    // First pass: count reports per station
+    snapshot.docs.forEach((doc: any) => {
+      const data = doc.data() as FirebaseReportData;
+      reportCounts[data.stationId] = (reportCounts[data.stationId] || 0) + 1;
+    });
+
+    // Second pass: get latest report for each station
+    snapshot.docs.forEach((doc: any) => {
+      const data = doc.data() as FirebaseReportData;
+      const existing = reports[data.stationId];
+
+      if (
+        !existing ||
+        (data.timestamp &&
+          existing.timestamp &&
+          data.timestamp.seconds > existing.timestamp.seconds)
+      ) {
+        reports[data.stationId] = {
+          petrol: data.petrol,
+          diesel: data.diesel,
+          queueLength: data.queueLength,
+          timestamp: data.timestamp,
+          reportCount: reportCounts[data.stationId] || 0,
+          lastReportTime: data.timestamp,
+        };
+      }
+    });
+
+    setStationStatus(reports);
+    setIsLoading(false);
+    setIsRefreshing(false);
+    setLastRefreshTime(new Date());
+
+    // Force a re-render of markers
+    setForceUpdate((prev) => prev + 1);
+  };
+
+  // Setup Firebase listener
+  const setupListener = useCallback(() => {
+    // Clean up existing listener if any
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+    }
+
+    const q = query(
+      collection(db, "fuelReports"),
+      orderBy("timestamp", "desc"),
+    );
+
     const unsubscribe = onSnapshot(
-      q, 
+      q,
       (snapshot) => {
-        const reports: Record<string, StationReport> = {};
-        const reportCounts: Record<string, number> = {};
-
-        // First pass: count reports per station
-        snapshot.docs.forEach((doc) => {
-          const data = doc.data() as FirebaseReportData;
-          reportCounts[data.stationId] = (reportCounts[data.stationId] || 0) + 1;
-        });
-
-        // Second pass: get latest report for each station
-        snapshot.docs.forEach((doc) => {
-          const data = doc.data() as FirebaseReportData;
-          const existing = reports[data.stationId];
-
-          if (
-            !existing ||
-            (data.timestamp &&
-              existing.timestamp &&
-              data.timestamp.seconds > existing.timestamp.seconds)
-          ) {
-            reports[data.stationId] = {
-              petrol: data.petrol,
-              diesel: data.diesel,
-              queueLength: data.queueLength,
-              timestamp: data.timestamp,
-              reportCount: reportCounts[data.stationId] || 0,
-              lastReportTime: data.timestamp,
-            };
-          }
-        });
-
-        setStationStatus(reports);
-        setIsLoading(false);
-        setIsRefreshing(false);
+        processReports(snapshot);
       },
       (error) => {
         console.error("Firestore listener error:", error);
         Alert.alert(
           "Connection Error",
-          "Failed to fetch fuel reports. Please check your internet connection."
+          "Failed to fetch fuel reports. Please check your internet connection.",
         );
         setIsLoading(false);
         setIsRefreshing(false);
-      }
+      },
     );
 
-    return () => unsubscribe();
+    unsubscribeRef.current = unsubscribe;
+    return unsubscribe;
   }, []);
+
+  // Initial setup
+  useEffect(() => {
+    setIsLoading(true);
+    const unsubscribe = setupListener();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [setupListener]);
+
+  // FIXED: Manual refresh function
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+
+    try {
+      // Clear marker references
+      markersRef.current.clear();
+
+      // Option 1: Force listener to re-fetch
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+
+      // Re-setup listener
+      setupListener();
+
+      // Also do a one-time direct fetch for immediate feedback
+      const q = query(
+        collection(db, "fuelReports"),
+        orderBy("timestamp", "desc"),
+      );
+      const snapshot = await getDocs(q);
+      processReports(snapshot);
+
+      // Force map to re-render markers by slightly adjusting region
+      if (mapRef.current) {
+        const camera = await mapRef.current.getCamera();
+        mapRef.current.animateCamera(
+          {
+            ...camera,
+            zoom: camera.zoom, // Same zoom, just triggers update
+          },
+          { duration: 100 },
+        );
+      }
+    } catch (error) {
+      console.error("Refresh error:", error);
+      Alert.alert(
+        "Refresh Failed",
+        "Could not refresh data. Please try again.",
+      );
+      setIsRefreshing(false);
+    }
+  }, [setupListener]);
 
   // Memoized helper functions
-  const getReportAgeMinutes = useCallback((timestamp?: Timestamp): number | null => {
-    if (!timestamp?.seconds) return null;
+  const getReportAgeMinutes = useCallback(
+    (timestamp?: Timestamp): number | null => {
+      if (!timestamp?.seconds) return null;
 
-    const reportTime = timestamp.seconds * 1000;
-    const now = Date.now();
-    const ageInMinutes = (now - reportTime) / 60000;
+      const reportTime = timestamp.seconds * 1000;
+      const now = Date.now();
+      const ageInMinutes = (now - reportTime) / 60000;
 
-    return Math.round(ageInMinutes * 10) / 10;
-  }, []);
+      return Math.round(ageInMinutes * 10) / 10;
+    },
+    [],
+  );
 
-  const getMarkerColor = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report?.timestamp) return COLORS.NO_REPORTS;
+  const getMarkerColor = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report?.timestamp) return COLORS.NO_REPORTS;
 
-    const age = getReportAgeMinutes(report.timestamp);
-    if (age && age > REPORT_EXPIRY_MINUTES) return COLORS.NO_REPORTS;
+      const age = getReportAgeMinutes(report.timestamp);
+      if (age && age > REPORT_EXPIRY_MINUTES) return COLORS.NO_REPORTS;
 
-    if (report.petrol || report.diesel) {
-      // If fuel is available, use queue length for color intensity
-      if (report.queueLength === 'high') return "#e67e22";
-      if (report.queueLength === 'medium') return "#f1c40f";
-      return COLORS.FUEL_AVAILABLE;
-    }
-    return COLORS.NO_FUEL;
-  }, [stationStatus, getReportAgeMinutes]);
+      if (report.petrol || report.diesel) {
+        if (report.queueLength === "high") return "#e67e22";
+        if (report.queueLength === "medium") return "#f1c40f";
+        return COLORS.FUEL_AVAILABLE;
+      }
+      return COLORS.NO_FUEL;
+    },
+    [stationStatus, getReportAgeMinutes, forceUpdate],
+  ); // Add forceUpdate dependency
 
-  const getFuelIcon = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report) return "gas-station";
+  const getFuelIcon = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report) return "gas-station";
 
-    if (report.petrol && !report.diesel) return "gas-station";
-    if (!report.petrol && report.diesel) return "truck";
-    if (report.petrol && report.diesel) return "gas-station";
-    return "close-circle";
-  }, [stationStatus]);
+      if (report.petrol && !report.diesel) return "gas-station";
+      if (!report.petrol && report.diesel) return "truck";
+      if (report.petrol && report.diesel) return "gas-station";
+      return "close-circle";
+    },
+    [stationStatus, forceUpdate],
+  );
 
-  const getFuelTypeIndicator = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report) return "⚪";
-    
-    if (report.petrol && report.diesel) return "⛽🚛";
-    if (report.petrol) return "⛽";
-    if (report.diesel) return "🚛";
-    return "❌";
-  }, [stationStatus]);
+  const getFuelTypeIndicator = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report) return "⚪";
 
-  const getQueueIcon = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report?.queueLength) return "";
-    
-    switch(report.queueLength) {
-      case 'low': return "🟢";
-      case 'medium': return "🟡";
-      case 'high': return "🔴";
-      default: return "";
-    }
-  }, [stationStatus]);
+      if (report.petrol && report.diesel) return "⛽🚛";
+      if (report.petrol) return "⛽";
+      if (report.diesel) return "🚛";
+      return "❌";
+    },
+    [stationStatus, forceUpdate],
+  );
 
-  const getFuelSubtitle = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report) return "No reports";
-    
-    const fuelTypes = [];
-    if (report.petrol) fuelTypes.push("⛽ Petrol");
-    if (report.diesel) fuelTypes.push("🚛 Diesel");
-    
-    if (fuelTypes.length === 0) return "No fuel";
-    return fuelTypes.join(" • ");
-  }, [stationStatus]);
+  const getQueueIcon = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report?.queueLength) return "";
 
-  const getQueueText = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report?.queueLength) return "";
-    
-    const queueMap = {
-      low: "🟢 Low queue",
-      medium: "🟡 Medium queue",
-      high: "🔴 Long queue"
-    };
-    return queueMap[report.queueLength];
-  }, [stationStatus]);
+      switch (report.queueLength) {
+        case "low":
+          return "🟢";
+        case "medium":
+          return "🟡";
+        case "high":
+          return "🔴";
+        default:
+          return "";
+      }
+    },
+    [stationStatus, forceUpdate],
+  );
 
-  const getFreshnessLabel = useCallback((stationId: string): string => {
-    const report = stationStatus[stationId];
-    if (!report?.timestamp) return "No reports";
+  const getFuelSubtitle = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report) return "No reports";
 
-    const age = getReportAgeMinutes(report.timestamp);
-    if (age === null) return "Unknown";
+      const fuelTypes = [];
+      if (report.petrol) fuelTypes.push("⛽ Petrol");
+      if (report.diesel) fuelTypes.push("🚛 Diesel");
 
-    if (age < FRESH_REPORT_THRESHOLD) return "🟢 Just reported";
-    if (age < 30) return `🟡 ${age} min ago`;
-    if (age < REPORT_EXPIRY_MINUTES) return `🟠 ${age} min ago (old)`;
-    return "🔴 Report expired";
-  }, [stationStatus, getReportAgeMinutes]);
+      if (fuelTypes.length === 0) return "No fuel";
+      return fuelTypes.join(" • ");
+    },
+    [stationStatus, forceUpdate],
+  );
 
-  const hasBothFuels = useCallback((stationId: string): boolean => {
-    const report = stationStatus[stationId];
-    return report?.petrol && report?.diesel || false;
-  }, [stationStatus]);
+  const getQueueText = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report?.queueLength) return "";
+
+      const queueMap = {
+        low: "🟢 Low queue",
+        medium: "🟡 Medium queue",
+        high: "🔴 Long queue",
+      };
+      return queueMap[report.queueLength];
+    },
+    [stationStatus, forceUpdate],
+  );
+
+  const getFreshnessLabel = useCallback(
+    (stationId: string): string => {
+      const report = stationStatus[stationId];
+      if (!report?.timestamp) return "No reports";
+
+      const age = getReportAgeMinutes(report.timestamp);
+      if (age === null) return "Unknown";
+
+      if (age < FRESH_REPORT_THRESHOLD) return "🟢 Just reported";
+      if (age < 30) return `🟡 ${age} min ago`;
+      if (age < REPORT_EXPIRY_MINUTES) return `🟠 ${age} min ago (old)`;
+      return "🔴 Report expired";
+    },
+    [stationStatus, getReportAgeMinutes, forceUpdate],
+  );
+
+  const hasBothFuels = useCallback(
+    (stationId: string): boolean => {
+      const report = stationStatus[stationId];
+      return (report?.petrol && report?.diesel) || false;
+    },
+    [stationStatus, forceUpdate],
+  );
 
   // Location functions
   const goToMyLocation = useCallback(async () => {
@@ -230,8 +354,8 @@ export default function HomeScreen() {
           "Please enable location services to see your position on the map.",
           [
             { text: "Cancel", style: "cancel" },
-            { text: "Settings", onPress: () => Location.openSettings() }
-          ]
+            { text: "Settings", onPress: () => Location.openSettings() },
+          ],
         );
         return;
       }
@@ -239,7 +363,7 @@ export default function HomeScreen() {
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      
+
       mapRef.current?.animateToRegion({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -250,7 +374,7 @@ export default function HomeScreen() {
       console.error("Error getting location:", error);
       Alert.alert(
         "Location Error",
-        "Could not get your location. Please check if GPS is enabled."
+        "Could not get your location. Please check if GPS is enabled.",
       );
     }
   }, []);
@@ -274,38 +398,49 @@ export default function HomeScreen() {
     });
   }, []);
 
-  const handleRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    setStationStatus({});
-  }, []);
+  // FIXED: Memoized markers with key that changes on forceUpdate
+  const markers = useMemo(() => {
+    console.log("Rendering markers, forceUpdate:", forceUpdate); // Debug log
 
-  // Memoized markers
-  const markers = useMemo(() => (
-    stations.map((station) => {
+    return stations.map((station) => {
       const report = stationStatus[station.id];
       const fuelIndicator = getFuelTypeIndicator(station.id);
       const queueIcon = getQueueIcon(station.id);
       const isSelected = selectedStation === station.id;
-      
+      const markerColor = getMarkerColor(station.id);
+      const fuelIcon = getFuelIcon(station.id);
+      const fuelSubtitle = getFuelSubtitle(station.id);
+      const queueText = getQueueText(station.id);
+      const freshnessLabel = getFreshnessLabel(station.id);
+      const reportCount = report?.reportCount;
+      const hasBoth = hasBothFuels(station.id);
+
       return (
         <Marker
-          key={station.id}
+          key={`${station.id}-${forceUpdate}`} // Force new marker on refresh
           coordinate={{
             latitude: station.latitude,
             longitude: station.longitude,
           }}
           onPress={() => handleMarkerPress(station)}
-          tracksViewChanges={false}
+          tracksViewChanges={true} // Changed to true to ensure updates
+          ref={(ref) => {
+            if (ref) {
+              markersRef.current.set(station.id, ref);
+            }
+          }}
         >
-          <View style={[
-            styles.markerContainer,
-            isSelected && styles.selectedMarker
-          ]}>
+          <View
+            style={[
+              styles.markerContainer,
+              isSelected && styles.selectedMarker,
+            ]}
+          >
             <View style={styles.markerBubble}>
               <MaterialCommunityIcons
-                name={getFuelIcon(station.id)}
+                name={fuelIcon}
                 size={24}
-                color={getMarkerColor(station.id)}
+                color={markerColor}
               />
               {/* Fuel Type Badge */}
               <View style={styles.fuelTypeBadge}>
@@ -317,33 +452,52 @@ export default function HomeScreen() {
                   <Text style={styles.queueText}>{queueIcon}</Text>
                 </View>
               )}
+              {/* Both fuels indicator */}
+              {hasBoth && (
+                <View style={styles.bothIndicator}>
+                  <Text style={styles.bothIndicatorText}>⛽🚛</Text>
+                </View>
+              )}
             </View>
             <View style={styles.markerLabel}>
               <Text style={styles.markerText} numberOfLines={1}>
                 {station.name}
               </Text>
               <Text style={styles.markerSubText} numberOfLines={1}>
-                {getFuelSubtitle(station.id)}
+                {fuelSubtitle}
               </Text>
               {report?.queueLength && (
                 <Text style={styles.queueText} numberOfLines={1}>
-                  {getQueueText(station.id)}
+                  {queueText}
                 </Text>
               )}
               <Text style={styles.freshnessText} numberOfLines={1}>
-                {getFreshnessLabel(station.id)}
+                {freshnessLabel}
               </Text>
-              {report?.reportCount && report.reportCount > 0 && (
+              {reportCount && reportCount > 0 && (
                 <Text style={styles.reportCountText}>
-                  📊 {report.reportCount} reports
+                  📊 {reportCount} reports
                 </Text>
               )}
             </View>
           </View>
         </Marker>
       );
-    })
-  ), [stationStatus, selectedStation]);
+    });
+  }, [
+    stationStatus,
+    selectedStation,
+    forceUpdate,
+    getFuelTypeIndicator,
+    getQueueIcon,
+    getFuelIcon,
+    getMarkerColor,
+    getFuelSubtitle,
+    getQueueText,
+    getFreshnessLabel,
+    hasBothFuels,
+    handleMarkerPress,
+  ]);
 
   if (isLoading) {
     return (
@@ -373,28 +527,44 @@ export default function HomeScreen() {
         {markers}
       </MapView>
 
-      {/* Refresh Button */}
-      <Pressable 
-        style={[styles.refreshButton, isRefreshing && styles.disabledButton]} 
+      {/* Refresh Button - FIXED */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.refreshButton,
+          isRefreshing && styles.refreshingButton,
+          pressed && styles.buttonPressed,
+        ]}
         onPress={handleRefresh}
         disabled={isRefreshing}
+        android_ripple={{ color: "rgba(255,255,255,0.3)" }}
       >
-        <MaterialCommunityIcons 
-          name={isRefreshing ? "loading" : "refresh"} 
-          size={20} 
-          color="white" 
+        <MaterialCommunityIcons
+          name={isRefreshing ? "loading" : "refresh"}
+          size={24}
+          color="white"
         />
+        <Text style={styles.refreshButtonText}>
+          {isRefreshing ? "Refreshing..." : "Refresh"}
+        </Text>
       </Pressable>
 
+      {/* Last Refresh Time */}
+      <View style={styles.lastRefreshContainer}>
+        <MaterialCommunityIcons name="clock-outline" size={12} color="#666" />
+        <Text style={styles.lastRefreshText}>
+          Updated: {lastRefreshTime.toLocaleTimeString()}
+        </Text>
+      </View>
+
       {/* Legend Toggle */}
-      <Pressable 
-        style={styles.legendToggle} 
+      <Pressable
+        style={styles.legendToggle}
         onPress={() => setShowLegend(!showLegend)}
       >
-        <MaterialCommunityIcons 
-          name={showLegend ? "eye" : "eye-off"} 
-          size={20} 
-          color="white" 
+        <MaterialCommunityIcons
+          name={showLegend ? "eye" : "eye-off"}
+          size={20}
+          color="white"
         />
       </Pressable>
 
@@ -404,28 +574,32 @@ export default function HomeScreen() {
           <Text style={styles.legendTitle}>📍 Legend</Text>
 
           <View style={styles.legendItem}>
-            <MaterialCommunityIcons name="gas-station" size={16} color={COLORS.NO_REPORTS} />
+            <MaterialCommunityIcons
+              name="gas-station"
+              size={16}
+              color={COLORS.NO_REPORTS}
+            />
             <Text style={styles.legendText}> No reports</Text>
           </View>
 
           <View style={styles.legendItem}>
             <View style={styles.legendFuelRow}>
               <Text style={styles.legendFuelText}>⛽</Text>
-              <Text style={styles.legendFuelText}> Petrol</Text>
+              <Text style={styles.legendText}> Petrol</Text>
             </View>
           </View>
 
           <View style={styles.legendItem}>
             <View style={styles.legendFuelRow}>
               <Text style={styles.legendFuelText}>🚛</Text>
-              <Text style={styles.legendFuelText}> Diesel</Text>
+              <Text style={styles.legendText}> Diesel</Text>
             </View>
           </View>
 
           <View style={styles.legendDivider} />
-          
+
           <Text style={styles.legendSubTitle}>Queue Length:</Text>
-          
+
           <View style={styles.legendItem}>
             <Text style={styles.legendQueueText}>🟢</Text>
             <Text style={styles.legendText}> Low queue</Text>
@@ -442,16 +616,11 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.legendDivider} />
-          
+
           <Text style={styles.legendNote}>
             Reports expire after {REPORT_EXPIRY_MINUTES} minutes
           </Text>
-          <Text style={styles.legendNote}>
-            • Shows fuel type badges on markers
-          </Text>
-          <Text style={styles.legendNote}>
-            • Queue indicators available
-          </Text>
+          <Text style={styles.legendNote}>• Pull down to refresh</Text>
         </View>
       )}
 
@@ -614,13 +783,48 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     position: "absolute",
-    top: 20,
+    top: 60, // Moved lower to avoid overlap with status bar
     right: 20,
     backgroundColor: COLORS.FUEL_AVAILABLE,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     borderRadius: 30,
-    elevation: 5,
+    elevation: 10, // Higher elevation to ensure it's above other elements
+    zIndex: 1000, // High z-index to ensure it's clickable
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    minWidth: 120, // Minimum width for better click area
+  },
+  refreshingButton: {
+    backgroundColor: "#f39c12",
+  },
+  refreshButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "700",
+    marginLeft: 8,
+  },
+  lastRefreshContainer: {
+    position: "absolute",
+    top: 70,
+    right: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
     zIndex: 1,
+  },
+  lastRefreshText: {
+    fontSize: 10,
+    color: "#666",
+    marginLeft: 4,
   },
   disabledButton: {
     opacity: 0.5,
@@ -699,13 +903,14 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     position: "absolute",
-    top: 20,
+    top: 120, // Moved down to avoid overlap with refresh button
     alignSelf: "center",
     backgroundColor: "rgba(0, 0, 0, 0.7)",
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 20,
     elevation: 5,
+    zIndex: 500,
   },
   statsText: {
     color: "white",
