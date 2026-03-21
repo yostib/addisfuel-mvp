@@ -20,6 +20,8 @@ import {
   query,
   orderBy,
   getDocs,
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 
 // Types
@@ -68,32 +70,82 @@ export default function HomeScreen() {
   >({});
   const [isLoading, setIsLoading] = useState(true);
   const [locationPermission, setLocationPermission] = useState<boolean | null>(
-    null,
+    null
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
   const [selectedStation, setSelectedStation] = useState<string | null>(null);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date());
-  const [forceUpdate, setForceUpdate] = useState(0); // Add this to force re-render
+  const [forceUpdate, setForceUpdate] = useState(0);
+  const [lastCleanupTime, setLastCleanupTime] = useState<Date>(new Date());
 
   const mapRef = useRef<MapView | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
-  const markersRef = useRef<Map<string, Marker>>(new Map()); // Store marker references
+  const markersRef = useRef<Map<string, Marker>>(new Map());
 
-  // Function to fetch and process reports
-  const processReports = (snapshot: any) => {
+  // Function to delete expired reports from Firestore
+  const cleanupExpiredReports = useCallback(async () => {
+    try {
+      const q = query(collection(db, "fuelReports"));
+      const snapshot = await getDocs(q);
+      const now = Date.now();
+      let deletedCount = 0;
+
+      for (const docSnapshot of snapshot.docs) {
+        const data = docSnapshot.data() as FirebaseReportData;
+        if (data.timestamp) {
+          const reportTime = data.timestamp.seconds * 1000;
+          const ageInMinutes = (now - reportTime) / 60000;
+
+          if (ageInMinutes > REPORT_EXPIRY_MINUTES) {
+            await deleteDoc(doc(db, "fuelReports", docSnapshot.id));
+            deletedCount++;
+          }
+        }
+      }
+
+      if (deletedCount > 0) {
+        console.log(`🗑️ Deleted ${deletedCount} expired reports`);
+        setLastCleanupTime(new Date());
+      }
+    } catch (error) {
+      console.error("Error cleaning up expired reports:", error);
+    }
+  }, []);
+
+  // Function to fetch and process reports (only include non-expired)
+  const processReports = useCallback((snapshot: any) => {
     const reports: Record<string, StationReport> = {};
     const reportCounts: Record<string, number> = {};
+    const now = Date.now();
 
-    // First pass: count reports per station
+    // First pass: count NON-EXPIRED reports per station
     snapshot.docs.forEach((doc: any) => {
       const data = doc.data() as FirebaseReportData;
-      reportCounts[data.stationId] = (reportCounts[data.stationId] || 0) + 1;
+      if (data.timestamp) {
+        const reportTime = data.timestamp.seconds * 1000;
+        const ageInMinutes = (now - reportTime) / 60000;
+
+        // Only count reports that are NOT expired
+        if (ageInMinutes <= REPORT_EXPIRY_MINUTES) {
+          reportCounts[data.stationId] = (reportCounts[data.stationId] || 0) + 1;
+        }
+      }
     });
 
-    // Second pass: get latest report for each station
+    // Second pass: get latest NON-EXPIRED report for each station
     snapshot.docs.forEach((doc: any) => {
       const data = doc.data() as FirebaseReportData;
+
+      // Skip if no timestamp
+      if (!data.timestamp) return;
+
+      const reportTime = data.timestamp.seconds * 1000;
+      const ageInMinutes = (now - reportTime) / 60000;
+
+      // Skip expired reports
+      if (ageInMinutes > REPORT_EXPIRY_MINUTES) return;
+
       const existing = reports[data.stationId];
 
       if (
@@ -120,7 +172,7 @@ export default function HomeScreen() {
 
     // Force a re-render of markers
     setForceUpdate((prev) => prev + 1);
-  };
+  }, []);
 
   // Setup Firebase listener
   const setupListener = useCallback(() => {
@@ -131,7 +183,7 @@ export default function HomeScreen() {
 
     const q = query(
       collection(db, "fuelReports"),
-      orderBy("timestamp", "desc"),
+      orderBy("timestamp", "desc")
     );
 
     const unsubscribe = onSnapshot(
@@ -143,30 +195,37 @@ export default function HomeScreen() {
         console.error("Firestore listener error:", error);
         Alert.alert(
           "Connection Error",
-          "Failed to fetch fuel reports. Please check your internet connection.",
+          "Failed to fetch fuel reports. Please check your internet connection."
         );
         setIsLoading(false);
         setIsRefreshing(false);
-      },
+      }
     );
 
     unsubscribeRef.current = unsubscribe;
     return unsubscribe;
-  }, []);
+  }, [processReports]);
 
   // Initial setup
   useEffect(() => {
     setIsLoading(true);
     const unsubscribe = setupListener();
 
+    // Run cleanup on app start
+    cleanupExpiredReports();
+
+    // Clean up expired reports every hour
+    const cleanupInterval = setInterval(cleanupExpiredReports, 60 * 60 * 1000);
+
     return () => {
       if (unsubscribe) {
         unsubscribe();
       }
+      clearInterval(cleanupInterval);
     };
-  }, [setupListener]);
+  }, [setupListener, cleanupExpiredReports]);
 
-  // FIXED: Manual refresh function
+  // Manual refresh function
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
 
@@ -174,7 +233,10 @@ export default function HomeScreen() {
       // Clear marker references
       markersRef.current.clear();
 
-      // Option 1: Force listener to re-fetch
+      // Clean up expired reports first
+      await cleanupExpiredReports();
+
+      // Force listener to re-fetch
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
       }
@@ -185,7 +247,7 @@ export default function HomeScreen() {
       // Also do a one-time direct fetch for immediate feedback
       const q = query(
         collection(db, "fuelReports"),
-        orderBy("timestamp", "desc"),
+        orderBy("timestamp", "desc")
       );
       const snapshot = await getDocs(q);
       processReports(snapshot);
@@ -196,42 +258,37 @@ export default function HomeScreen() {
         mapRef.current.animateCamera(
           {
             ...camera,
-            zoom: camera.zoom, // Same zoom, just triggers update
+            zoom: camera.zoom,
           },
-          { duration: 100 },
+          { duration: 100 }
         );
       }
     } catch (error) {
       console.error("Refresh error:", error);
       Alert.alert(
         "Refresh Failed",
-        "Could not refresh data. Please try again.",
+        "Could not refresh data. Please try again."
       );
       setIsRefreshing(false);
     }
-  }, [setupListener]);
+  }, [setupListener, processReports, cleanupExpiredReports]);
 
   // Memoized helper functions
   const getReportAgeMinutes = useCallback(
     (timestamp?: Timestamp): number | null => {
       if (!timestamp?.seconds) return null;
-
       const reportTime = timestamp.seconds * 1000;
       const now = Date.now();
       const ageInMinutes = (now - reportTime) / 60000;
-
       return Math.round(ageInMinutes * 10) / 10;
     },
-    [],
+    []
   );
 
   const getMarkerColor = useCallback(
     (stationId: string): string => {
       const report = stationStatus[stationId];
-      if (!report?.timestamp) return COLORS.NO_REPORTS;
-
-      const age = getReportAgeMinutes(report.timestamp);
-      if (age && age > REPORT_EXPIRY_MINUTES) return COLORS.NO_REPORTS;
+      if (!report) return COLORS.NO_REPORTS;
 
       if (report.petrol || report.diesel) {
         if (report.queueLength === "high") return "#e67e22";
@@ -240,8 +297,8 @@ export default function HomeScreen() {
       }
       return COLORS.NO_FUEL;
     },
-    [stationStatus, getReportAgeMinutes, forceUpdate],
-  ); // Add forceUpdate dependency
+    [stationStatus, forceUpdate]
+  );
 
   const getFuelIcon = useCallback(
     (stationId: string): string => {
@@ -253,27 +310,25 @@ export default function HomeScreen() {
       if (report.petrol && report.diesel) return "gas-station";
       return "close-circle";
     },
-    [stationStatus, forceUpdate],
+    [stationStatus, forceUpdate]
   );
 
   const getFuelTypeIndicator = useCallback(
     (stationId: string): string => {
       const report = stationStatus[stationId];
       if (!report) return "⚪";
-
       if (report.petrol && report.diesel) return "⛽🚛";
       if (report.petrol) return "⛽";
       if (report.diesel) return "🚛";
       return "❌";
     },
-    [stationStatus, forceUpdate],
+    [stationStatus, forceUpdate]
   );
 
   const getQueueIcon = useCallback(
     (stationId: string): string => {
       const report = stationStatus[stationId];
       if (!report?.queueLength) return "";
-
       switch (report.queueLength) {
         case "low":
           return "🟢";
@@ -285,29 +340,26 @@ export default function HomeScreen() {
           return "";
       }
     },
-    [stationStatus, forceUpdate],
+    [stationStatus, forceUpdate]
   );
 
   const getFuelSubtitle = useCallback(
     (stationId: string): string => {
       const report = stationStatus[stationId];
       if (!report) return "No reports";
-
       const fuelTypes = [];
       if (report.petrol) fuelTypes.push("⛽ Petrol");
       if (report.diesel) fuelTypes.push("🚛 Diesel");
-
       if (fuelTypes.length === 0) return "No fuel";
       return fuelTypes.join(" • ");
     },
-    [stationStatus, forceUpdate],
+    [stationStatus, forceUpdate]
   );
 
   const getQueueText = useCallback(
     (stationId: string): string => {
       const report = stationStatus[stationId];
       if (!report?.queueLength) return "";
-
       const queueMap = {
         low: "🟢 Low queue",
         medium: "🟡 Medium queue",
@@ -315,23 +367,21 @@ export default function HomeScreen() {
       };
       return queueMap[report.queueLength];
     },
-    [stationStatus, forceUpdate],
+    [stationStatus, forceUpdate]
   );
 
   const getFreshnessLabel = useCallback(
     (stationId: string): string => {
       const report = stationStatus[stationId];
       if (!report?.timestamp) return "No reports";
-
       const age = getReportAgeMinutes(report.timestamp);
       if (age === null) return "Unknown";
-
       if (age < FRESH_REPORT_THRESHOLD) return "🟢 Just reported";
       if (age < 30) return `🟡 ${age} min ago`;
       if (age < REPORT_EXPIRY_MINUTES) return `🟠 ${age} min ago (old)`;
       return "🔴 Report expired";
     },
-    [stationStatus, getReportAgeMinutes, forceUpdate],
+    [stationStatus, getReportAgeMinutes, forceUpdate]
   );
 
   const hasBothFuels = useCallback(
@@ -339,7 +389,7 @@ export default function HomeScreen() {
       const report = stationStatus[stationId];
       return (report?.petrol && report?.diesel) || false;
     },
-    [stationStatus, forceUpdate],
+    [stationStatus, forceUpdate]
   );
 
   // Location functions
@@ -355,7 +405,7 @@ export default function HomeScreen() {
           [
             { text: "Cancel", style: "cancel" },
             { text: "Settings", onPress: () => Location.openSettings() },
-          ],
+          ]
         );
         return;
       }
@@ -374,7 +424,7 @@ export default function HomeScreen() {
       console.error("Error getting location:", error);
       Alert.alert(
         "Location Error",
-        "Could not get your location. Please check if GPS is enabled.",
+        "Could not get your location. Please check if GPS is enabled."
       );
     }
   }, []);
@@ -398,9 +448,9 @@ export default function HomeScreen() {
     });
   }, []);
 
-  // FIXED: Memoized markers with key that changes on forceUpdate
+  // Memoized markers
   const markers = useMemo(() => {
-    console.log("Rendering markers, forceUpdate:", forceUpdate); // Debug log
+    console.log("Rendering markers, active stations:", Object.keys(stationStatus).length);
 
     return stations.map((station) => {
       const report = stationStatus[station.id];
@@ -417,13 +467,13 @@ export default function HomeScreen() {
 
       return (
         <Marker
-          key={`${station.id}-${forceUpdate}`} // Force new marker on refresh
+          key={`${station.id}-${forceUpdate}`}
           coordinate={{
             latitude: station.latitude,
             longitude: station.longitude,
           }}
           onPress={() => handleMarkerPress(station)}
-          tracksViewChanges={true} // Changed to true to ensure updates
+          tracksViewChanges={true}
           ref={(ref) => {
             if (ref) {
               markersRef.current.set(station.id, ref);
@@ -476,7 +526,7 @@ export default function HomeScreen() {
               </Text>
               {reportCount && reportCount > 0 && (
                 <Text style={styles.reportCountText}>
-                  📊 {reportCount} reports
+                  📊 {reportCount} {reportCount === 1 ? "report" : "reports"}
                 </Text>
               )}
             </View>
@@ -527,46 +577,62 @@ export default function HomeScreen() {
         {markers}
       </MapView>
 
-      {/* Refresh Button - FIXED */}
-      <Pressable
-        style={({ pressed }) => [
-          styles.refreshButton,
-          isRefreshing && styles.refreshingButton,
-          pressed && styles.buttonPressed,
-        ]}
-        onPress={handleRefresh}
-        disabled={isRefreshing}
-        android_ripple={{ color: "rgba(255,255,255,0.3)" }}
-      >
-        <MaterialCommunityIcons
-          name={isRefreshing ? "loading" : "refresh"}
-          size={24}
-          color="white"
-        />
-        <Text style={styles.refreshButtonText}>
-          {isRefreshing ? "Refreshing..." : "Refresh"}
-        </Text>
-      </Pressable>
+      {/* Top Buttons Container */}
+      <View style={styles.topButtonsContainer}>
+        {/* Refresh Button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.refreshButton,
+            isRefreshing && styles.refreshingButton,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={handleRefresh}
+          disabled={isRefreshing}
+          android_ripple={{ color: "rgba(255,255,255,0.3)" }}
+        >
+          <MaterialCommunityIcons
+            name={isRefreshing ? "loading" : "refresh"}
+            size={20}
+            color="white"
+          />
+          <Text style={styles.refreshButtonText}>
+            {isRefreshing ? "Refreshing..." : "Refresh"}
+          </Text>
+        </Pressable>
 
-      {/* Last Refresh Time */}
-      <View style={styles.lastRefreshContainer}>
-        <MaterialCommunityIcons name="clock-outline" size={12} color="#666" />
-        <Text style={styles.lastRefreshText}>
-          Updated: {lastRefreshTime.toLocaleTimeString()}
-        </Text>
+        {/* Legend Toggle */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.legendToggle,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={() => setShowLegend(!showLegend)}
+        >
+          <MaterialCommunityIcons
+            name={showLegend ? "eye" : "eye-off"}
+            size={20}
+            color="white"
+          />
+        </Pressable>
       </View>
 
-      {/* Legend Toggle */}
-      <Pressable
-        style={styles.legendToggle}
-        onPress={() => setShowLegend(!showLegend)}
-      >
-        <MaterialCommunityIcons
-          name={showLegend ? "eye" : "eye-off"}
-          size={20}
-          color="white"
-        />
-      </Pressable>
+      {/* Last Refresh & Cleanup Info */}
+      <View style={styles.infoContainer}>
+        <View style={styles.infoItem}>
+          <MaterialCommunityIcons name="clock-outline" size={12} color="#666" />
+          <Text style={styles.infoText}>
+            Updated: {lastRefreshTime.toLocaleTimeString()}
+          </Text>
+        </View>
+        {lastCleanupTime && (
+          <View style={styles.infoItem}>
+            <MaterialCommunityIcons name="delete" size={12} color="#666" />
+            <Text style={styles.infoText}>
+              Cleaned: {lastCleanupTime.toLocaleTimeString()}
+            </Text>
+          </View>
+        )}
+      </View>
 
       {/* Legend */}
       {showLegend && (
@@ -602,17 +668,17 @@ export default function HomeScreen() {
 
           <View style={styles.legendItem}>
             <Text style={styles.legendQueueText}>🟢</Text>
-            <Text style={styles.legendText}> Low queue</Text>
+            <Text style={styles.legendText}> Low (&lt;5 min)</Text>
           </View>
 
           <View style={styles.legendItem}>
             <Text style={styles.legendQueueText}>🟡</Text>
-            <Text style={styles.legendText}> Medium queue</Text>
+            <Text style={styles.legendText}> Medium (5-15 min)</Text>
           </View>
 
           <View style={styles.legendItem}>
             <Text style={styles.legendQueueText}>🔴</Text>
-            <Text style={styles.legendText}> Long queue</Text>
+            <Text style={styles.legendText}> High (&gt;15 min)</Text>
           </View>
 
           <View style={styles.legendDivider} />
@@ -620,24 +686,42 @@ export default function HomeScreen() {
           <Text style={styles.legendNote}>
             Reports expire after {REPORT_EXPIRY_MINUTES} minutes
           </Text>
-          <Text style={styles.legendNote}>• Pull down to refresh</Text>
+          <Text style={styles.legendNote}>• Active reports shown only</Text>
+          <Text style={styles.legendNote}>• Old reports auto-deleted</Text>
         </View>
       )}
 
-      <Pressable style={styles.locationButton} onPress={goToMyLocation}>
-        <MaterialCommunityIcons name="crosshairs-gps" size={20} color="white" />
-        <Text style={styles.locationText}> My Location</Text>
-      </Pressable>
+      {/* Bottom Buttons */}
+      <View style={styles.bottomButtonsContainer}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.locationButton,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={goToMyLocation}
+        >
+          <MaterialCommunityIcons name="crosshairs-gps" size={20} color="white" />
+          <Text style={styles.locationText}> My Location</Text>
+        </Pressable>
 
-      <Pressable style={styles.testButton} onPress={goToAddis}>
-        <MaterialCommunityIcons name="map-marker" size={20} color="white" />
-        <Text style={styles.locationText}> Addis Ababa</Text>
-      </Pressable>
+        <Pressable
+          style={({ pressed }) => [
+            styles.testButton,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={goToAddis}
+        >
+          <MaterialCommunityIcons name="map-marker" size={20} color="white" />
+          <Text style={styles.locationText}> Addis Ababa</Text>
+        </Pressable>
+      </View>
 
       {/* Stats */}
       <View style={styles.statsContainer}>
         <Text style={styles.statsText}>
-          📊 {Object.keys(stationStatus).length} stations with reports
+          📊 {Object.keys(stationStatus).length} active{" "}
+          {Object.keys(stationStatus).length === 1 ? "station" : "stations"} with
+          reports
         </Text>
       </View>
     </View>
@@ -757,40 +841,24 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
   },
-  locationButton: {
+  topButtonsContainer: {
     position: "absolute",
-    bottom: 110,
-    right: 20,
-    backgroundColor: COLORS.FUEL_AVAILABLE,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 25,
-    elevation: 5,
+    top: 50,
+    left: 0,
+    right: 0,
     flexDirection: "row",
-    alignItems: "center",
-  },
-  testButton: {
-    position: "absolute",
-    bottom: 60,
-    right: 20,
-    backgroundColor: "#3498db",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 25,
-    elevation: 5,
-    flexDirection: "row",
-    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 15,
+    zIndex: 1000,
+    pointerEvents: "box-none",
   },
   refreshButton: {
-    position: "absolute",
-    top: 60, // Moved lower to avoid overlap with status bar
-    right: 20,
     backgroundColor: COLORS.FUEL_AVAILABLE,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 30,
-    elevation: 10, // Higher elevation to ensure it's above other elements
-    zIndex: 1000, // High z-index to ensure it's clickable
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 25,
+    elevation: 10,
+    zIndex: 1000,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -798,55 +866,113 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
-    minWidth: 120, // Minimum width for better click area
+    minWidth: 110,
   },
   refreshingButton: {
     backgroundColor: "#f39c12",
   },
   refreshButtonText: {
     color: "white",
-    fontSize: 14,
-    fontWeight: "700",
-    marginLeft: 8,
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: 6,
   },
-  lastRefreshContainer: {
+  legendToggle: {
+    backgroundColor: "#3498db",
+    padding: 10,
+    borderRadius: 25,
+    elevation: 10,
+    zIndex: 1000,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    minWidth: 44,
+    alignItems: "center",
+  },
+  infoContainer: {
     position: "absolute",
-    top: 70,
-    right: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    top: 105,
+    right: 15,
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 6,
     borderRadius: 12,
+    zIndex: 900,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  infoItem: {
     flexDirection: "row",
     alignItems: "center",
-    zIndex: 1,
+    marginVertical: 2,
   },
-  lastRefreshText: {
-    fontSize: 10,
+  infoText: {
+    fontSize: 9,
     color: "#666",
     marginLeft: 4,
   },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  legendToggle: {
+  bottomButtonsContainer: {
     position: "absolute",
-    top: 20,
-    left: 15,
+    bottom: 40,
+    right: 20,
+    alignItems: "flex-end",
+    zIndex: 1000,
+    pointerEvents: "box-none",
+  },
+  locationButton: {
+    backgroundColor: COLORS.FUEL_AVAILABLE,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 25,
+    elevation: 10,
+    zIndex: 1000,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    minWidth: 130,
+  },
+  testButton: {
     backgroundColor: "#3498db",
-    padding: 12,
-    borderRadius: 30,
-    elevation: 5,
-    zIndex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 25,
+    elevation: 10,
+    zIndex: 1000,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    minWidth: 130,
+  },
+  buttonPressed: {
+    transform: [{ scale: 0.95 }],
+    opacity: 0.9,
+  },
+  locationText: {
+    color: "white",
+    fontWeight: "600",
+    marginLeft: 6,
+    fontSize: 13,
   },
   legendContainer: {
     position: "absolute",
-    top: 80,
+    top: 150,
     left: 15,
     backgroundColor: COLORS.BACKGROUND_LIGHT,
-    padding: 15,
+    padding: 12,
     borderRadius: 10,
-    elevation: 5,
+    elevation: 8,
+    zIndex: 900,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -856,65 +982,64 @@ const styles = StyleSheet.create({
   legendTitle: {
     fontWeight: "bold",
     marginBottom: 8,
-    fontSize: 14,
+    fontSize: 13,
   },
   legendSubTitle: {
     fontWeight: "600",
-    marginTop: 8,
+    marginTop: 6,
     marginBottom: 4,
-    fontSize: 12,
+    fontSize: 11,
   },
   legendItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 4,
+    marginVertical: 3,
   },
   legendFuelRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   legendFuelText: {
-    fontSize: 14,
+    fontSize: 13,
   },
   legendQueueText: {
-    fontSize: 16,
+    fontSize: 14,
     marginRight: 4,
   },
   legendText: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#333",
     marginLeft: 6,
   },
   legendDivider: {
     height: 1,
     backgroundColor: "#ddd",
-    marginVertical: 8,
+    marginVertical: 6,
   },
   legendNote: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#666",
     fontStyle: "italic",
-    marginTop: 4,
-  },
-  locationText: {
-    color: "white",
-    fontWeight: "600",
-    marginLeft: 4,
+    marginTop: 3,
   },
   statsContainer: {
     position: "absolute",
-    top: 120, // Moved down to avoid overlap with refresh button
+    top: 145,
     alignSelf: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    paddingHorizontal: 15,
-    paddingVertical: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 20,
-    elevation: 5,
-    zIndex: 500,
+    elevation: 8,
+    zIndex: 900,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
   statsText: {
     color: "white",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "500",
   },
 });
