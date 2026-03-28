@@ -78,10 +78,21 @@ export default function HomeScreen() {
   const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date());
   const [forceUpdate, setForceUpdate] = useState(0);
   const [lastCleanupTime, setLastCleanupTime] = useState<Date>(new Date());
+  
+  // Map type state - simple version without persistence
+  const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
+  const [showMapTypeSelector, setShowMapTypeSelector] = useState(false);
 
   const mapRef = useRef<MapView | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const markersRef = useRef<Map<string, Marker>>(new Map());
+
+  // Simple function to change map type (no persistence)
+  const changeMapType = useCallback((type: 'standard' | 'satellite' | 'hybrid') => {
+    setMapType(type);
+    setShowMapTypeSelector(false);
+    console.log('Map type changed to:', type);
+  }, []);
 
   // Function to delete expired reports from Firestore
   const cleanupExpiredReports = useCallback(async () => {
@@ -563,6 +574,7 @@ export default function HomeScreen() {
       <MapView
         ref={mapRef}
         style={styles.map}
+        mapType={mapType}
         initialRegion={{
           ...ADDIS_ABABA_COORDS,
           latitudeDelta: 0.1,
@@ -600,6 +612,25 @@ export default function HomeScreen() {
           </Text>
         </Pressable>
 
+        {/* Map Type Toggle Button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.mapTypeButton,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={() => setShowMapTypeSelector(!showMapTypeSelector)}
+          android_ripple={{ color: "rgba(255,255,255,0.3)" }}
+        >
+          <MaterialCommunityIcons
+            name={
+              mapType === 'standard' ? 'map' :
+              mapType === 'satellite' ? 'satellite' : 'satellite-variant'
+            }
+            size={20}
+            color="white"
+          />
+        </Pressable>
+
         {/* Legend Toggle */}
         <Pressable
           style={({ pressed }) => [
@@ -633,6 +664,53 @@ export default function HomeScreen() {
           </View>
         )}
       </View>
+
+      {/* Map Type Selector Dropdown */}
+      {showMapTypeSelector && (
+        <View style={styles.mapTypeSelector}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.mapTypeOption,
+              mapType === 'standard' && styles.mapTypeOptionActive,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => changeMapType('standard')}
+          >
+            <MaterialCommunityIcons name="map" size={20} color={mapType === 'standard' ? "#2ecc71" : "#666"} />
+            <Text style={[styles.mapTypeOptionText, mapType === 'standard' && styles.mapTypeOptionTextActive]}>
+              Standard
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.mapTypeOption,
+              mapType === 'satellite' && styles.mapTypeOptionActive,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => changeMapType('satellite')}
+          >
+            <MaterialCommunityIcons name="satellite" size={20} color={mapType === 'satellite' ? "#2ecc71" : "#666"} />
+            <Text style={[styles.mapTypeOptionText, mapType === 'satellite' && styles.mapTypeOptionTextActive]}>
+              Satellite
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.mapTypeOption,
+              mapType === 'hybrid' && styles.mapTypeOptionActive,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => changeMapType('hybrid')}
+          >
+            <MaterialCommunityIcons name="satellite-variant" size={20} color={mapType === 'hybrid' ? "#2ecc71" : "#666"} />
+            <Text style={[styles.mapTypeOptionText, mapType === 'hybrid' && styles.mapTypeOptionTextActive]}>
+              Hybrid
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Legend */}
       {showLegend && (
@@ -877,6 +955,19 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 6,
   },
+  mapTypeButton: {
+    backgroundColor: "#3498db",
+    padding: 10,
+    borderRadius: 25,
+    elevation: 10,
+    zIndex: 1000,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    minWidth: 44,
+    alignItems: "center",
+  },
   legendToggle: {
     backgroundColor: "#3498db",
     padding: 10,
@@ -914,6 +1005,41 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: "#666",
     marginLeft: 4,
+  },
+  mapTypeSelector: {
+    position: "absolute",
+    top: 110,
+    right: 20,
+    backgroundColor: COLORS.BACKGROUND_WHITE,
+    borderRadius: 12,
+    padding: 8,
+    elevation: 10,
+    zIndex: 1000,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    minWidth: 140,
+  },
+  mapTypeOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginVertical: 2,
+  },
+  mapTypeOptionActive: {
+    backgroundColor: "#e8f5e9",
+  },
+  mapTypeOptionText: {
+    fontSize: 14,
+    color: "#666",
+    marginLeft: 10,
+  },
+  mapTypeOptionTextActive: {
+    color: "#2ecc71",
+    fontWeight: "600",
   },
   bottomButtonsContainer: {
     position: "absolute",
