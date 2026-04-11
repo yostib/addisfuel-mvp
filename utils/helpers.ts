@@ -1,14 +1,23 @@
 import { Timestamp } from "firebase/firestore";
+import { COLORS } from "./constants";
 
 // Pure calculation functions (no hooks, no dependencies on other functions)
-export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+export const calculateDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number => {
   const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
 
@@ -16,7 +25,7 @@ export const getTravelTime = (distanceKm: number): string => {
   const avgSpeed = 40;
   const timeHours = distanceKm / avgSpeed;
   const timeMinutes = Math.round(timeHours * 60);
-  if (timeMinutes < 1) return '<1 min';
+  if (timeMinutes < 1) return "<1 min";
   if (timeMinutes < 60) return `${timeMinutes} min`;
   const hours = Math.floor(timeMinutes / 60);
   const mins = timeMinutes % 60;
@@ -39,20 +48,29 @@ export const getFuelIcon = (petrol: boolean, diesel: boolean): string => {
   return "close-circle";
 };
 
-export const getFuelTypeIndicator = (petrol: boolean, diesel: boolean): string => {
+export const getFuelTypeIndicator = (
+  petrol: boolean,
+  diesel: boolean,
+): string => {
   if (petrol && diesel) return "⛽🚛";
   if (petrol) return "⛽";
   if (diesel) return "🚛";
   return "❌";
 };
 
-export const getQueueIcon = (queueLength?: "low" | "medium" | "high"): string => {
+export const getQueueIcon = (
+  queueLength?: "low" | "medium" | "high",
+): string => {
   if (!queueLength) return "";
   switch (queueLength) {
-    case "low": return "🟢";
-    case "medium": return "🟡";
-    case "high": return "🔴";
-    default: return "";
+    case "low":
+      return "🟢";
+    case "medium":
+      return "🟡";
+    case "high":
+      return "🔴";
+    default:
+      return "";
   }
 };
 
@@ -64,7 +82,9 @@ export const getFuelSubtitle = (petrol: boolean, diesel: boolean): string => {
   return fuelTypes.join(" • ");
 };
 
-export const getQueueText = (queueLength?: "low" | "medium" | "high"): string => {
+export const getQueueText = (
+  queueLength?: "low" | "medium" | "high",
+): string => {
   if (!queueLength) return "";
   const queueMap = {
     low: "🟢 Low queue",
@@ -84,4 +104,18 @@ export const getFreshnessLabel = (age: number | null): string => {
 
 export const hasBothFuels = (petrol: boolean, diesel: boolean): boolean => {
   return petrol && diesel;
+};
+
+export const getMarkerColor = (report?: {
+  petrol: boolean;
+  diesel: boolean;
+  queueLength?: "low" | "medium" | "high";
+}): string => {
+  if (!report) return COLORS.NO_REPORTS;
+  if (report.petrol || report.diesel) {
+    if (report.queueLength === "high") return COLORS.WARNING;
+    if (report.queueLength === "medium") return COLORS.SECONDARY;
+    return COLORS.FUEL_AVAILABLE;
+  }
+  return COLORS.NO_FUEL;
 };

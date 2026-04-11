@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform } from "react-native";
 
 export const REPORT_EXPIRY_MINUTES = 90;
 export const FRESH_REPORT_THRESHOLD = 5;
@@ -21,21 +21,29 @@ export const COLORS = {
   BACKGROUND_LIGHT: "rgba(255, 255, 255, 0.95)",
   REFRESH_BUTTON: "#f39c12",
   REFRESH_BUTTON_ACTIVE: "#e67e22",
+  BACKGROUND: "rgba(255, 255, 255, 0.95)",
+  BORDER: "#d1d5db",
+  PRIMARY: "#2ecc71",
+  TEXT_SECONDARY: "#666",
+  WHITE: "white",
+  TEXT_PRIMARY: "#333",
+  SECONDARY: "#f39c12",
+  WARNING: "#f39c12",
 } as const;
 
 export const NAVIGATION_APPS = {
   apple: {
-    name: 'Apple Maps',
-    icon: 'apple',
-    scheme: 'maps://',
-    url: (lat: number, lng: number, name: string) => 
+    name: "Apple Maps",
+    icon: "apple",
+    scheme: "maps://",
+    url: (lat: number, lng: number, name: string) =>
       `maps://?q=${lat},${lng}&name=${encodeURIComponent(name)}`,
-    available: Platform.OS === 'ios',
+    available: Platform.OS === "ios",
   },
   google: {
-    name: 'Google Maps',
-    icon: 'google-maps',
-    scheme: 'comgooglemaps://',
+    name: "Google Maps",
+    icon: "google-maps",
+    scheme: "comgooglemaps://",
     url: (lat: number, lng: number, name: string) =>
       `comgooglemaps://?q=${lat},${lng}&center=${lat},${lng}&zoom=14`,
     webUrl: (lat: number, lng: number, name: string) =>
@@ -43,9 +51,9 @@ export const NAVIGATION_APPS = {
     available: true,
   },
   waze: {
-    name: 'Waze',
-    icon: 'waze',
-    scheme: 'waze://',
+    name: "Waze",
+    icon: "waze",
+    scheme: "waze://",
     url: (lat: number, lng: number, name: string) =>
       `waze://?ll=${lat},${lng}&navigate=yes`,
     webUrl: (lat: number, lng: number, name: string) =>

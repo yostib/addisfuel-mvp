@@ -1,29 +1,28 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  Alert,
-  Pressable,
-  ScrollView,
-  ActivityIndicator,
-  Linking,
-  Animated,
-} from "react-native";
-import { useLocalSearchParams, router } from "expo-router";
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  Timestamp,
-  getDocs,
-} from "firebase/firestore";
-import { db } from "../../firebase";
-import { useState, useEffect, useRef } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import {
+    addDoc,
+    collection,
+    getDocs,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    Timestamp,
+    where,
+} from "firebase/firestore";
+import { useEffect, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+import { db } from "../../firebase";
 
 interface Report {
   id: string;
@@ -149,6 +148,7 @@ export default function StationDetailScreen() {
 
   // Start animations when current status changes
   useEffect(() => {
+    const currentStatus = reports[0];
     if (currentStatus) {
       // Animate petrol if available
       if (currentStatus.petrol) {
@@ -190,7 +190,7 @@ export default function StationDetailScreen() {
         dieselPulseAnim.setValue(1);
       }
     }
-  }, [reports[0]]); // Run when latest report changes
+  }, [reports, petrolPulseAnim, dieselPulseAnim]);
 
   // Calculate statistics
   const statistics = {
