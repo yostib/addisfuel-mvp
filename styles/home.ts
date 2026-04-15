@@ -188,6 +188,14 @@ export const styles = StyleSheet.create({
     fontWeight: "700",
     color: COLORS.TEXT_PRIMARY,
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  headerRefreshButton: {
+    padding: 4,
+  },
   nearbyStationCard: {
     marginBottom: 12,
     backgroundColor: COLORS.WHITE,
@@ -210,6 +218,11 @@ export const styles = StyleSheet.create({
     marginTop: 10,
     color: COLORS.TEXT_PRIMARY,
     fontWeight: "600",
+  },
+  nearbyStationInfo: {
+    marginTop: 6,
+    color: COLORS.TEXT_SECONDARY,
+    fontSize: 12,
   },
   bottomActions: {
     flexDirection: "row",

@@ -56,10 +56,15 @@ export default function HomeScreen() {
     refreshFuelReports,
   } = useFuelReports();
 
-  const { nearbyStations, findNearbyStations } = useNearbyStations(
-    userLocation,
-    stationStatus,
-  );
+  const {
+    nearbyStations,
+    findNearbyStations,
+    isRefreshing: isRefreshingNearby,
+  } = useNearbyStations(userLocation, stationStatus);
+
+  const refreshNearbyStations = useCallback(() => {
+    findNearbyStations(true); // Force refresh
+  }, [findNearbyStations]);
 
   const menuAnimation = useRef(new Animated.Value(0)).current;
   const fabAnimation = useRef(new Animated.Value(0)).current;
@@ -243,16 +248,30 @@ export default function HomeScreen() {
 
   const handleNearbyPress = useCallback(() => {
     if (!userLocation) {
-      Alert.alert("Location Required", "Please set your location first.", [
-        { text: "OK" },
-      ]);
+      if (isTestMode) {
+        // In test mode, use Addis Ababa as default location
+        setUserLocation(ADDIS_ABABA_COORDS);
+        setTimeout(() => {
+          findNearbyStations();
+          setShowNearby(true);
+          setTimeout(() => {
+            bottomSheetRef.current?.expand?.();
+          }, 100);
+        }, 100);
+      } else {
+        Alert.alert("Location Required", "Please set your location first.", [
+          { text: "OK" },
+        ]);
+      }
       return;
     }
 
     findNearbyStations();
     setShowNearby(true);
-    bottomSheetRef.current?.expand();
-  }, [findNearbyStations, userLocation]);
+    setTimeout(() => {
+      bottomSheetRef.current?.expand?.();
+    }, 100);
+  }, [findNearbyStations, userLocation, isTestMode]);
 
   const handleMarkerPress = useCallback((station: Station) => {
     setSelectedStation(station.id);
@@ -308,7 +327,7 @@ export default function HomeScreen() {
           />
         );
       }),
-    [forceUpdate, handleMarkerPress, selectedStation, stationStatus],
+    [forceUpdate, handleMarkerPress, selectedStation],
   );
 
   if (isLoading) {
@@ -392,6 +411,7 @@ export default function HomeScreen() {
           userLocation={userLocation}
           nearbyStations={nearbyStations}
           isTestMode={isTestMode}
+          isRefreshing={isRefreshingNearby}
           bottomSheetRef={bottomSheetRef}
           onClose={() => setShowNearby(false)}
           onSelectStation={(station) => {
@@ -403,6 +423,7 @@ export default function HomeScreen() {
             });
           }}
           onNavigate={showNavigationOptions}
+          onRefreshNearby={refreshNearbyStations}
           getTravelTime={getTravelTime}
         />
       </View>
