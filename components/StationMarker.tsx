@@ -1,6 +1,6 @@
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Marker } from "react-native-maps";
+import { Marker, Callout } from "react-native-maps";
 import { Station } from "../data/stations";
 import { StationReport } from "../hooks/useFuelReports";
 import {
@@ -21,7 +21,8 @@ interface StationMarkerProps {
   isSelected: boolean;
   forceUpdate: number;
   markerColor: string;
-  onPress: () => void;
+  onSelect: () => void;
+  onDetails: () => void;
 }
 
 export default function StationMarker({
@@ -30,7 +31,8 @@ export default function StationMarker({
   isSelected,
   forceUpdate,
   markerColor,
-  onPress,
+  onSelect,
+  onDetails,
 }: StationMarkerProps) {
   const hasReport = !!report;
   const fuelIndicator = hasReport
@@ -55,7 +57,7 @@ export default function StationMarker({
     <Marker
       key={`${station.id}-${forceUpdate}`}
       coordinate={{ latitude: station.latitude, longitude: station.longitude }}
-      onPress={onPress}
+      onPress={onSelect}
       tracksViewChanges={true}
     >
       <View
@@ -81,34 +83,47 @@ export default function StationMarker({
             </View>
           )}
         </View>
-        <View style={styles.markerLabel}>
-          <Text style={styles.markerText} numberOfLines={1}>
-            {station.name}
-          </Text>
-          <Text style={styles.markerSubText} numberOfLines={1}>
-            {fuelSubtitle}
-          </Text>
-          {report?.queueLength && (
-            <Text style={styles.queueText} numberOfLines={1}>
-              {queueText}
+
+        {isSelected && (
+          <View style={styles.markerLabel}>
+            <Text style={styles.markerText} numberOfLines={1}>
+              {station.name}
             </Text>
-          )}
-          <Text style={styles.freshnessText} numberOfLines={1}>
-            {freshnessLabel}
-          </Text>
-          {reportCount && reportCount > 0 && (
-            <Text style={styles.reportCountText}>
-              📊 {reportCount} {reportCount === 1 ? "report" : "reports"}
+            <Text style={styles.markerSubText} numberOfLines={1}>
+              {fuelSubtitle}
             </Text>
-          )}
-        </View>
+            {report?.queueLength && (
+              <Text style={styles.queueText} numberOfLines={1}>
+                {queueText}
+              </Text>
+            )}
+            <Text style={styles.freshnessText} numberOfLines={1}>
+              {freshnessLabel}
+            </Text>
+            {reportCount && reportCount > 0 && (
+              <Text style={styles.reportCountText} numberOfLines={1}>
+                📊 {reportCount} {reportCount === 1 ? "report" : "reports"}
+              </Text>
+            )}
+            <Pressable style={styles.detailsButton} onPress={onDetails}>
+              <Text style={styles.detailsButtonText}>View details</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
+      {isSelected && (
+        <Callout tooltip onPress={onDetails}>
+          <View style={styles.calloutContainer}>
+            <Text style={styles.calloutText}>Tap for full station report</Text>
+          </View>
+        </Callout>
+      )}
     </Marker>
   );
 }
 
 const styles = StyleSheet.create({
-  markerContainer: { alignItems: "center", width: 90 },
+  markerContainer: { alignItems: "center", width: 70 },
   selectedMarker: { transform: [{ scale: 1.1 }] },
   markerBubble: {
     backgroundColor: COLORS.BACKGROUND_WHITE,
@@ -126,8 +141,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    marginTop: 4,
-    maxWidth: 120,
+    marginTop: 8,
+    maxWidth: 140,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calloutContainer: {
+    backgroundColor: "rgba(0,0,0,0.75)",
+    padding: 10,
+    borderRadius: 10,
+    maxWidth: 180,
+  },
+  calloutText: {
+    color: "white",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  detailsButton: {
+    marginTop: 8,
+    backgroundColor: COLORS.PRIMARY,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  detailsButtonText: {
+    color: COLORS.WHITE,
+    fontSize: 11,
+    fontWeight: "700",
   },
   markerText: {
     fontSize: 11,

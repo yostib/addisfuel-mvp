@@ -273,8 +273,11 @@ export default function HomeScreen() {
     }, 100);
   }, [findNearbyStations, userLocation, isTestMode]);
 
-  const handleMarkerPress = useCallback((station: Station) => {
-    setSelectedStation(station.id);
+  const handleMarkerSelect = useCallback((stationId: string) => {
+    setSelectedStation(stationId);
+  }, []);
+
+  const handleMarkerDetails = useCallback((station: Station) => {
     router.push({
       pathname: "/station/[id]",
       params: { id: station.id, name: station.name },
@@ -323,11 +326,12 @@ export default function HomeScreen() {
             isSelected={selectedStation === station.id}
             forceUpdate={forceUpdate}
             markerColor={markerColor}
-            onPress={() => handleMarkerPress(station)}
+            onSelect={() => handleMarkerSelect(station.id)}
+            onDetails={() => handleMarkerDetails(station)}
           />
         );
       }),
-    [forceUpdate, handleMarkerPress, selectedStation],
+    [forceUpdate, handleMarkerSelect, handleMarkerDetails, selectedStation, stationStatus],
   );
 
   if (isLoading) {

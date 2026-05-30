@@ -97,9 +97,6 @@ export default function NearbyBottomSheet({
           </Text>
         ) : (
           nearbyStations.map(({ station, distance, fuelStatus, timestamp }) => {
-            const ageMinutes = Math.floor((Date.now() - timestamp) / 60000);
-            const isStale = ageMinutes > 2;
-
             return (
               <Pressable
                 key={station.id}

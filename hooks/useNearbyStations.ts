@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Station, stations } from "../data/stations";
 import { calculateDistance, getReportAgeMinutes } from "../utils/helpers";
 import { StationReport } from "./useFuelReports";
+import { REPORT_EXPIRY_MINUTES } from "../utils/constants";
 
 export interface NearbyStation {
   station: Station;
@@ -70,7 +71,15 @@ export function useNearbyStations(
             reportAgeMinutes: getReportAgeMinutes(fuelStatus?.timestamp),
           };
         })
-        .filter((item) => item.fuelStatus?.petrol || item.fuelStatus?.diesel);
+        .filter((item) => {
+          const age = item.reportAgeMinutes;
+          return (
+            item.fuelStatus != null &&
+            (item.fuelStatus.petrol || item.fuelStatus.diesel) &&
+            age !== null &&
+            age <= REPORT_EXPIRY_MINUTES
+          );
+        });
 
       sorted.sort((a, b) => {
         if (a.distance !== b.distance) return a.distance - b.distance;

@@ -11,7 +11,7 @@ import {
     Timestamp,
     where,
 } from "firebase/firestore";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -23,6 +23,8 @@ import {
     View,
 } from "react-native";
 import { db } from "../../firebase";
+import { REPORT_EXPIRY_MINUTES } from "../../utils/constants";
+import { getReportAgeMinutes } from "../../utils/helpers";
 
 interface Report {
   id: string;
@@ -40,6 +42,112 @@ export default function StationDetailScreen() {
     "low" | "medium" | "high" | null
   >(null);
   const [indexError, setIndexError] = useState(false);
+  const [language, setLanguage] = useState<"en" | "am">("en");
+
+  const translations = {
+    en: {
+      currentStatus: "🔄 CURRENT STATUS",
+      fuelAvailability: "Fuel Availability:",
+      petrol: "Petrol",
+      diesel: "Diesel",
+      available: "Available",
+      unavailable: "Unavailable",
+      bothAvailable: "Both Petrol and Diesel Available!",
+      queueStatus: "Queue Status:",
+      lowQueue: "Low Queue",
+      mediumQueue: "Medium Queue",
+      highQueue: "Long Queue",
+      lowWait: "Less than 5 minutes wait",
+      mediumWait: "5-15 minutes wait",
+      highWait: "More than 15 minutes wait",
+      lastReport: "Last report:",
+      reportFuelStatus: "📝 REPORT FUEL STATUS",
+      stepOne: "Step 1: Select Queue Length",
+      stepTwo: "Step 2: Report Fuel Availability",
+      low: "Low",
+      medium: "Medium",
+      high: "High",
+      bothAvailableLabel: "Both Available",
+      noFuel: "No Fuel",
+      selectQueueFirst: "Select queue length first",
+      statistics: "📊 STATISTICS",
+      totalReports: "Total Reports",
+      petrolReports: "Petrol Reports",
+      dieselReports: "Diesel Reports",
+      bothAvailableShort: "Both Available",
+      noFuelShort: "No Fuel",
+      queueDistribution: "Queue Distribution:",
+      lowShort: "Low",
+      medShort: "Med",
+      highShort: "High",
+      recentReports: "📋 RECENT REPORTS",
+      noReportsYet: "No reports yet for this station",
+      noReportsSub: "Be the first to report fuel availability!",
+      viewDetails: "View details",
+      languageLabelEN: "EN",
+      languageLabelAM: "አማ",
+      queueLengthAlert: "Queue Length",
+      queueLengthPrompt: "Please select queue length before reporting",
+      successReport: "Report submitted for",
+      failedReport: "Failed to report fuel.",
+      noReportsHeading: "No reports yet for this station",
+      beFirst: "Be the first to report fuel availability!",
+    },
+    am: {
+      currentStatus: "🔄 የአሁኑ ሁኔታ",
+      fuelAvailability: "የእሳት እንደገና መገኘት:",
+      petrol: "ፔትሮል",
+      diesel: "ዲዝል",
+      available: "አለ",
+      unavailable: "የለም",
+      bothAvailable: "ፔትሮል እና ዲዝል ሁለቱም አሉ!",
+      queueStatus: "የተራ ሁኔታ:",
+      lowQueue: "የታነ ተራ",
+      mediumQueue: "የመካከለኛ ተራ",
+      highQueue: "የረዘም ተራ",
+      lowWait: "ከ5 ደቂቃ በታች",
+      mediumWait: "ከ5-15 ደቂቃ",
+      highWait: "ከ15 ደቂቃ በላይ",
+      lastReport: "መጨረሻ ሪፖርት:",
+      reportFuelStatus: "📝 የእሳት ሁኔታ ሪፖርት",
+      stepOne: "እርምጃ 1: የተራ ርዝመት ይምረጡ",
+      stepTwo: "እርምጃ 2: የእሳት እንደሚገኝ ይሪፖርቱ",
+      low: "ዝቅ",
+      medium: "መካከለኛ",
+      high: "ከፍተኛ",
+      bothAvailableLabel: "ሁለቱም አሉ",
+      noFuel: "እሳት የለም",
+      selectQueueFirst: "ከሪፖርት በፊት እባክዎ የተራ ርዝመት ይምረጡ",
+      statistics: "📊 ውጤቶች",
+      totalReports: "ድርሰቶች ጠቅላላ",
+      petrolReports: "የፔትሮል ሪፖርቶች",
+      dieselReports: "የዲዝል ሪፖርቶች",
+      bothAvailableShort: "ሁለቱም አሉ",
+      noFuelShort: "እሳት የለም",
+      queueDistribution: "የተራ ብዛት:",
+      lowShort: "ዝቅ",
+      medShort: "መ",
+      highShort: "ከፍ",
+      recentReports: "📋 የቅርብ ጊዜ ሪፖርቶች",
+      noReportsYet: "ለዚህ ጣቢያ እስካሁን አልተረፈርም",
+      noReportsSub: "የመጀመሪያው ሪፖርተር ይሁኑ!",
+      viewDetails: "ዝርዝር ይመልከቱ",
+      languageLabelEN: "EN",
+      languageLabelAM: "አማ",
+      queueLengthAlert: "የተራ ርዝመት",
+      queueLengthPrompt: "እባክዎ ከሪፖርት በፊት የተራ ርዝመት ይምረጡ",
+      successReport: "ሪፖርት ተላከ ለ",
+      failedReport: "የእሳት ሪፖርት ማስገባት አልተቻለም።",
+      noReportsHeading: "ለዚህ ጣቢያ እስካሁን አልተረፈርም",
+      beFirst: "የመጀመሪያው ሪፖርተር ይሁኑ!",
+    },
+  } as const;
+
+  const strings = translations[language];
+
+  const toggleLanguage = () => {
+    setLanguage((prev) => (prev === "en" ? "am" : "en"));
+  };
 
   // Animation values
   const petrolPulseAnim = useRef(new Animated.Value(1)).current;
@@ -192,25 +300,32 @@ export default function StationDetailScreen() {
     }
   }, [reports, petrolPulseAnim, dieselPulseAnim]);
 
+  const activeReports = useMemo(() => {
+    return reports.filter((report) => {
+      const age = getReportAgeMinutes(report.timestamp);
+      return age !== null && age <= REPORT_EXPIRY_MINUTES;
+    });
+  }, [reports]);
+
   // Calculate statistics
   const statistics = {
-    totalReports: reports.length,
-    lastReport: reports.length > 0 ? reports[0] : null,
+    totalReports: activeReports.length,
+    lastReport: activeReports.length > 0 ? activeReports[0] : null,
 
-    petrolAvailable: reports.filter((r) => r.petrol).length,
-    dieselAvailable: reports.filter((r) => r.diesel).length,
-    bothAvailable: reports.filter((r) => r.petrol && r.diesel).length,
-    noFuel: reports.filter((r) => !r.petrol && !r.diesel).length,
+    petrolAvailable: activeReports.filter((r) => r.petrol).length,
+    dieselAvailable: activeReports.filter((r) => r.diesel).length,
+    bothAvailable: activeReports.filter((r) => r.petrol && r.diesel).length,
+    noFuel: activeReports.filter((r) => !r.petrol && !r.diesel).length,
 
     queueLengths: {
-      low: reports.filter((r) => r.queueLength === "low").length,
-      medium: reports.filter((r) => r.queueLength === "medium").length,
-      high: reports.filter((r) => r.queueLength === "high").length,
+      low: activeReports.filter((r) => r.queueLength === "low").length,
+      medium: activeReports.filter((r) => r.queueLength === "medium").length,
+      high: activeReports.filter((r) => r.queueLength === "high").length,
     },
   };
 
-  // Get current status (latest report)
-  const currentStatus = reports[0];
+  // Get current status (latest active report)
+  const currentStatus = activeReports[0];
 
   const getQueueColor = (queue?: "low" | "medium" | "high") => {
     switch (queue) {
@@ -315,6 +430,11 @@ export default function StationDetailScreen() {
           <Text style={styles.title}>{params.name}</Text>
           <Text style={styles.stationId}>ID: {params.id}</Text>
         </View>
+        <Pressable style={styles.languageButton} onPress={toggleLanguage}>
+          <Text style={styles.languageButtonText}>
+            {language === "en" ? strings.languageLabelEN : strings.languageLabelAM}
+          </Text>
+        </Pressable>
       </View>
 
       {/* Index Warning Banner */}
@@ -329,12 +449,12 @@ export default function StationDetailScreen() {
 
       {/* Current Status Card - Enhanced */}
       <View style={styles.currentStatusCard}>
-        <Text style={styles.sectionTitle}>🔄 CURRENT STATUS</Text>
+        <Text style={styles.sectionTitle}>{strings.currentStatus}</Text>
 
         {currentStatus ? (
           <>
             {/* Fuel Availability with Animation */}
-            <Text style={styles.statusSubTitle}>Fuel Availability:</Text>
+            <Text style={styles.statusSubTitle}>{strings.fuelAvailability}</Text>
             <View style={styles.fuelStatusRow}>
               {/* Petrol Indicator */}
               <Animated.View
@@ -355,7 +475,7 @@ export default function StationDetailScreen() {
                   size={32}
                   color="white"
                 />
-                <Text style={styles.fuelCardText}>Petrol</Text>
+                <Text style={styles.fuelCardText}>{strings.petrol}</Text>
                 {currentStatus.petrol && (
                   <View style={styles.availableBadge}>
                     <MaterialCommunityIcons
@@ -393,7 +513,7 @@ export default function StationDetailScreen() {
                 ]}
               >
                 <MaterialCommunityIcons name="truck" size={32} color="white" />
-                <Text style={styles.fuelCardText}>Diesel</Text>
+                <Text style={styles.fuelCardText}>{strings.diesel}</Text>
                 {currentStatus.diesel && (
                   <View style={styles.availableBadge}>
                     <MaterialCommunityIcons
@@ -426,7 +546,7 @@ export default function StationDetailScreen() {
                   color="#2ecc71"
                 />
                 <Text style={styles.bothAvailableText}>
-                  Both Petrol and Diesel Available!
+                  {strings.bothAvailable}
                 </Text>
               </View>
             )}
@@ -434,7 +554,7 @@ export default function StationDetailScreen() {
             {/* Queue Status with Enhanced Display */}
             {currentStatus.queueLength && (
               <View style={styles.queueStatusContainer}>
-                <Text style={styles.statusSubTitle}>Queue Status:</Text>
+                <Text style={styles.statusSubTitle}>{strings.queueStatus}</Text>
                 <View
                   style={[
                     styles.queueCard,
@@ -451,12 +571,9 @@ export default function StationDetailScreen() {
                       {getQueueText(currentStatus.queueLength)}
                     </Text>
                     <Text style={styles.queueDescription}>
-                      {currentStatus.queueLength === "low" &&
-                        "Less than 5 minutes wait"}
-                      {currentStatus.queueLength === "medium" &&
-                        "5-15 minutes wait"}
-                      {currentStatus.queueLength === "high" &&
-                        "More than 15 minutes wait"}
+                      {currentStatus.queueLength === "low" && strings.lowWait}
+                      {currentStatus.queueLength === "medium" && strings.mediumWait}
+                      {currentStatus.queueLength === "high" && strings.highWait}
                     </Text>
                   </View>
                 </View>
@@ -471,7 +588,7 @@ export default function StationDetailScreen() {
                 color="#7f8c8d"
               />
               <Text style={styles.lastReportTime}>
-                Last report: {formatTime(currentStatus.timestamp)}
+                {strings.lastReport} {formatTime(currentStatus.timestamp)}
               </Text>
             </View>
 
@@ -499,10 +616,10 @@ export default function StationDetailScreen() {
               color="#95a5a6"
             />
             <Text style={styles.noReportsText}>
-              No reports yet for this station
+              {strings.noReportsYet}
             </Text>
             <Text style={styles.noReportsSubText}>
-              Be the first to report fuel availability!
+              {strings.noReportsSub}
             </Text>
           </View>
         )}
@@ -510,12 +627,12 @@ export default function StationDetailScreen() {
 
       {/* Report Section */}
       <View style={styles.reportSection}>
-        <Text style={styles.sectionTitle}>📝 REPORT FUEL STATUS</Text>
+        <Text style={styles.sectionTitle}>{strings.reportFuelStatus}</Text>
 
         {/* Queue Selection */}
         <View style={styles.queueSelectionContainer}>
           <Text style={styles.subSectionTitle}>
-            Step 1: Select Queue Length
+            {strings.stepOne}
           </Text>
           <View style={styles.queueOptions}>
             <Pressable
@@ -526,7 +643,7 @@ export default function StationDetailScreen() {
               onPress={() => setSelectedQueue("low")}
             >
               <Text style={styles.queueOptionIcon}>🟢</Text>
-              <Text style={styles.queueOptionText}>Low</Text>
+              <Text style={styles.queueOptionText}>{strings.low}</Text>
               <Text style={styles.queueOptionDesc}>(&lt; 5 min)</Text>
             </Pressable>
 
@@ -538,7 +655,7 @@ export default function StationDetailScreen() {
               onPress={() => setSelectedQueue("medium")}
             >
               <Text style={styles.queueOptionIcon}>🟡</Text>
-              <Text style={styles.queueOptionText}>Medium</Text>
+              <Text style={styles.queueOptionText}>{strings.medium}</Text>
               <Text style={styles.queueOptionDesc}>(5-15 min)</Text>
             </Pressable>
 
@@ -550,14 +667,14 @@ export default function StationDetailScreen() {
               onPress={() => setSelectedQueue("high")}
             >
               <Text style={styles.queueOptionIcon}>🔴</Text>
-              <Text style={styles.queueOptionText}>High</Text>
+              <Text style={styles.queueOptionText}>{strings.high}</Text>
               <Text style={styles.queueOptionDesc}>(&gt; 15 min)</Text>
             </Pressable>
           </View>
         </View>
 
         <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>
-          Step 2: Report Fuel Availability
+          {strings.stepTwo}
         </Text>
 
         <View style={styles.reportButtonsContainer}>
@@ -576,7 +693,7 @@ export default function StationDetailScreen() {
               size={24}
               color="white"
             />
-            <Text style={styles.reportButtonText}>Petrol Only</Text>
+            <Text style={styles.reportButtonText}>{strings.petrol} Only</Text>
           </Pressable>
 
           <Pressable
@@ -590,7 +707,7 @@ export default function StationDetailScreen() {
             disabled={!selectedQueue}
           >
             <MaterialCommunityIcons name="truck" size={24} color="white" />
-            <Text style={styles.reportButtonText}>Diesel Only</Text>
+            <Text style={styles.reportButtonText}>{strings.diesel} Only</Text>
           </Pressable>
 
           <Pressable
@@ -611,7 +728,7 @@ export default function StationDetailScreen() {
               />
               <MaterialCommunityIcons name="truck" size={20} color="white" />
             </View>
-            <Text style={styles.reportButtonText}>Both Available</Text>
+            <Text style={styles.reportButtonText}>{strings.bothAvailableLabel}</Text>
           </Pressable>
 
           <Pressable
@@ -629,20 +746,20 @@ export default function StationDetailScreen() {
               size={24}
               color="white"
             />
-            <Text style={styles.reportButtonText}>No Fuel</Text>
+            <Text style={styles.reportButtonText}>{strings.noFuel}</Text>
           </Pressable>
         </View>
 
         {!selectedQueue && (
           <View style={styles.hintContainer}>
             <MaterialCommunityIcons name="arrow-up" size={20} color="#f39c12" />
-            <Text style={styles.hintText}>Select queue length first</Text>
+            <Text style={styles.hintText}>{strings.selectQueueFirst}</Text>
           </View>
         )}
       </View>
 
       {/* Statistics */}
-      {reports.length > 0 && (
+      {activeReports.length > 0 && (
         <View style={styles.statsCard}>
           <Text style={styles.sectionTitle}>📊 STATISTICS</Text>
 
@@ -723,15 +840,15 @@ export default function StationDetailScreen() {
       )}
 
       {/* Recent Reports */}
-      {reports.length > 0 && (
+      {activeReports.length > 0 && (
         <View style={styles.recentReports}>
           <Text style={styles.sectionTitle}>📋 RECENT REPORTS</Text>
 
-          {reports.slice(0, 10).map((report, index) => (
+          {activeReports.slice(0, 10).map((report, index) => (
             <View key={report.id} style={styles.reportItem}>
               <View style={styles.reportItemLeft}>
                 <Text style={styles.reportItemNumber}>
-                  #{reports.length - index}
+                  #{activeReports.length - index}
                 </Text>
                 <View style={styles.reportItemFuels}>
                   {report.petrol && (
